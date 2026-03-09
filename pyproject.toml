@@ -1,0 +1,51 @@
+[tool.poetry]
+name = "calibrated-binary-classifier"
+version = "1.0.0"
+description = "Production-ready binary classification framework with advanced calibration (Venn-ABERS, isotonic) and temporal validation"
+authors = ["Ekhlakov Ilia"]
+readme = "README.md"
+license = "MIT"
+keywords = ["machine-learning", "fraud-detection", "calibration", "venn-abers", "conformal-prediction"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "<2.0.0"
+pandas = ">=2.0.0"
+scikit-learn = "1.4.0"
+lightgbm = "^4.3.0"
+category-encoders = "^2.6.3"
+feature-engine = "^1.7.0"
+venn-abers = "^1.5.0"
+optuna = "^3.6.1"
+shap = "^0.45.1"
+matplotlib = "^3.8.4"
+seaborn = "^0.13.2"
+pyyaml = "^6.0.1"
+joblib = "^1.3.0"
+
+[tool.poetry.group.dev.dependencies]
+jupyter = "^1.0.0"
+ipywidgets = "^8.0.0"
+black = "^23.0.0"
+pytest = "^7.4.0"
+mypy = "^1.5.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
