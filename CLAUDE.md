@@ -17,7 +17,7 @@ This is a production-ready **binary classification framework** supporting:
 
 ```
 .
-├── src/
+├── calibrated_clf/
 │   ├── model.py                    # Core: CalibratedBinaryClassifier
 │   ├── calibration.py              # Venn-ABERS + isotonic + sigmoid
 │   ├── data_loader.py              # IEEE Fraud data loading & time groups
@@ -52,7 +52,8 @@ This is a production-ready **binary classification framework** supporting:
 # Using uv (recommended)
 uv venv
 source .venv/bin/activate
-/Users/ilia.ekhlakov/.local/bin/uv pip install -r requirements.txt
+uv pip install -r requirements.txt
+uv pip install -e .
 
 # Or using poetry
 poetry install
@@ -62,8 +63,8 @@ poetry shell
 ### Train on Fraud Detection
 
 ```python
-from src.data_loader import load_fraud_data, create_time_groups
-from src.model import CalibratedBinaryClassifier
+from calibrated_clf.data_loader import load_fraud_data, create_time_groups
+from calibrated_clf.model import CalibratedBinaryClassifier
 
 # Load data
 df = load_fraud_data(sample_frac=0.1)  # 10% sample for development
@@ -97,7 +98,7 @@ print(f"Mean uncertainty: {intervals['interval_width'].mean():.4f}")
 ### Temporal Validation
 
 ```python
-from src.validators import SimpleSplitter
+from calibrated_clf.validators import SimpleSplitter
 
 splitter = SimpleSplitter(
     n_splits=5,
@@ -207,7 +208,7 @@ The `TimeWindowedTargetEncoder` in `data_transformers.py` prevents both **data l
 - Balance between preventing leakage and using relevant historical data
 
 ```python
-from src.data_transformers import TimeWindowedTargetEncoder
+from calibrated_clf.data_transformers import TimeWindowedTargetEncoder
 
 encoder = TimeWindowedTargetEncoder(
     time_column='TransactionDT',
@@ -224,7 +225,7 @@ X_encoded = encoder.fit_transform(X_train, y_train)
 ## Common Tasks
 
 ### Add New Features
-Edit `CalibratedBinaryClassifier.prepare_and_extract_features()` in `src/model.py`:
+Edit `CalibratedBinaryClassifier.prepare_and_extract_features()` in `calibrated_clf/model.py`:
 ```python
 if 'new_column' in X_.columns:
     X_["new_feature"] = X_["new_column"].apply(transformation)
@@ -245,7 +246,7 @@ model = CalibratedBinaryClassifier(
 
 ### Run Hyperparameter Optimization
 ```python
-from src.train_model import train_model
+from calibrated_clf.train_model import train_model
 
 train_model(
     train_data=df,
@@ -267,7 +268,7 @@ predictions = model.predict_proba(X_test)
 ### Use Time-Windowed Target Encoding
 For temporal data with concept drift, use `TimeWindowedTargetEncoder`:
 ```python
-from src.data_transformers import TimeWindowedTargetEncoder
+from calibrated_clf.data_transformers import TimeWindowedTargetEncoder
 from sklearn.pipeline import Pipeline
 
 # Create encoder (replaces standard CatBoost encoder)
@@ -332,8 +333,8 @@ pipeline = Pipeline([
 ### Run Feature Engineering Test
 ```bash
 .venv/bin/python3 -c "
-from src.data_loader import load_fraud_data
-from src.model import CalibratedBinaryClassifier
+from calibrated_clf.data_loader import load_fraud_data
+from calibrated_clf.model import CalibratedBinaryClassifier
 
 df = load_fraud_data(sample_frac=0.01)
 X = df.drop(columns=['isFraud'])
@@ -344,7 +345,7 @@ print(f'Original: {X.shape[1]}, Engineered: {X_eng.shape[1]}')
 
 ### Run Data Loader Test
 ```bash
-.venv/bin/python3 src/data_loader.py
+.venv/bin/python3 calibrated_clf/data_loader.py
 ```
 
 ---
@@ -403,8 +404,8 @@ These files work correctly and should not be changed without good reason:
 ## Recent Changes
 
 **2026-02-08:**
-- ✅ Implemented Venn-ABERS calibration (`src/calibration.py`)
-- ✅ Added IEEE Fraud Detection data loader (`src/data_loader.py`)
+- ✅ Implemented Venn-ABERS calibration (`calibrated_clf/calibration.py`)
+- ✅ Added IEEE Fraud Detection data loader (`calibrated_clf/data_loader.py`)
 - ✅ Refactored `BidWinModel` → `CalibratedBinaryClassifier` with backward compatibility
 - ✅ Added comprehensive docstrings (NumPy/Google style)
 - ✅ Added type hints throughout core model
@@ -470,13 +471,13 @@ uv pip install venn-abers
 **Temporal Validation**: SimpleSplitter with time-based splits
 
 **Key Files for Modification:**
-1. `src/model.py` - Core model and feature engineering
-2. `src/data_loader.py` - Data loading and preprocessing
-3. `src/train_model.py` - Training pipeline
+1. `calibrated_clf/model.py` - Core model and feature engineering
+2. `calibrated_clf/data_loader.py` - Data loading and preprocessing
+3. `calibrated_clf/train_model.py` - Training pipeline
 
 **Key Files for Reference Only:**
-1. `src/validators.py` - Temporal validation (already optimal)
-2. `src/config.py` - Fixed parameters (rarely changed)
+1. `calibrated_clf/validators.py` - Temporal validation (already optimal)
+2. `calibrated_clf/config.py` - Fixed parameters (rarely changed)
 3. `FRAUD_DETECTION_MIGRATION_SPEC.md` - Complete migration documentation
 
 ---

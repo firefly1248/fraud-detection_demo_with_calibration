@@ -6,6 +6,8 @@ from sklearn.calibration import calibration_curve
 from sklearn.metrics import f1_score, roc_auc_score, roc_curve
 from sklearn.model_selection import StratifiedKFold
 
+from .config import RANDOM_SEED
+
 plt.rcParams["figure.figsize"] = (10, 6)
 
 
@@ -23,7 +25,7 @@ def select_threshold_maximize_f1_cv(model, X, y, n_splits=5):
     Returns:
     - best_threshold: float - The optimal threshold to maximize the F1 score.
     """
-    kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=RANDOM_SEED)
     thresholds = np.arange(0.01, 1.01, 0.01)
 
     best_threshold = 0.0

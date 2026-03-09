@@ -10,10 +10,10 @@ Implements and compares multiple calibration approaches:
 import typing as tp
 import numpy as np
 import pandas as pd
+from .config import RANDOM_SEED
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.isotonic import IsotonicRegression
-from venn_abers import VennAbersCalibrator
 
 
 class DataFrameWrapper(BaseEstimator, ClassifierMixin):
@@ -73,16 +73,20 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
         venn_abers_mode: str = "inductive",
         cal_size: float = 0.2,
         cv_folds: int = 5,
-        random_state: int = 0,
+        random_state: int = RANDOM_SEED,
+        time_column: tp.Optional[str] = None,
     ):
         """
         Args:
             base_estimator: Fitted classifier to calibrate
             method: Calibration method ('isotonic', 'venn_abers', 'sigmoid', None)
             venn_abers_mode: 'inductive' (faster) or 'cross' (more robust)
-            cal_size: Calibration set size for inductive Venn-ABERS (0.0-1.0)
+            cal_size: Calibration set size (0.0-1.0)
             cv_folds: Number of folds for cross Venn-ABERS
-            random_state: Random seed
+            random_state: Random seed (used only when time_column is None)
+            time_column: If provided, sort by this column and use the latest
+                cal_size fraction for calibration (temporal split).
+                If None, use a random stratified split.
         """
         self.base_estimator = base_estimator
         self.method = method
@@ -90,8 +94,31 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
         self.cal_size = cal_size
         self.cv_folds = cv_folds
         self.random_state = random_state
+        self.time_column = time_column
         self.calibrator_ = None
         self.classes_ = None
+
+    def _split_for_calibration(self, X: pd.DataFrame, y: pd.Series):
+        """Split data into proper training set and calibration set.
+
+        If time_column is set, uses a chronological split (last cal_size fraction
+        of rows, sorted by time, becomes the calibration set). Otherwise falls
+        back to a random stratified split.
+        """
+        if self.time_column is not None and self.time_column in X.columns:
+            X_sorted = X.sort_values(self.time_column)
+            n_cal = max(1, int(len(X_sorted) * self.cal_size))
+            X_proper = X_sorted.iloc[:-n_cal]
+            X_cal = X_sorted.iloc[-n_cal:]
+            y_proper = y.loc[X_proper.index]
+            y_cal = y.loc[X_cal.index]
+        else:
+            from sklearn.model_selection import train_test_split
+
+            X_proper, X_cal, y_proper, y_cal = train_test_split(
+                X, y, test_size=self.cal_size, random_state=self.random_state, stratify=y
+            )
+        return X_proper, X_cal, y_proper, y_cal
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
         """Fit calibration on top of base estimator."""
@@ -103,23 +130,15 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
             return self
 
         elif self.method in ("isotonic", "sigmoid"):
-            # Split off a held-out calibration set so the calibrator is never
-            # fitted on the same data the base model was trained on.
-            # Training on the same data causes the isotonic/sigmoid layer to
-            # overfit to the overconfident in-sample predictions of LightGBM,
-            # which degrades calibration quality on the test set.
-            from sklearn.model_selection import train_test_split
             from sklearn.base import clone
 
-            X_proper, X_cal, y_proper, y_cal = train_test_split(
-                X, y, test_size=self.cal_size, random_state=self.random_state, stratify=y
-            )
+            X_proper, X_cal, y_proper, y_cal = self._split_for_calibration(X, y)
 
-            # Refit the base model on the proper training set only
+            # Refit the base model on the proper training portion only
             self.base_estimator = clone(self.base_estimator)
             self.base_estimator.fit(X_proper, y_proper)
 
-            # Fit the calibration layer on the held-out set
+            # Fit the calibration layer on the held-out (more recent) portion
             self.calibrator_ = CalibratedClassifierCV(
                 estimator=self.base_estimator, method=self.method, cv="prefit"
             )
@@ -129,18 +148,14 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
             # Venn-ABERS conformal prediction using rigorous implementation
             # This avoids the issue of VennAbersCalibrator refitting the pipeline
             # with numpy arrays when it expects DataFrames
-            from sklearn.model_selection import train_test_split
 
             # For inductive Venn-ABERS, split into proper training and calibration sets
             if self.venn_abers_mode == "inductive":
-                # Split data for inductive calibration
-                X_proper, X_cal, y_proper, y_cal = train_test_split(
-                    X, y, test_size=self.cal_size, random_state=self.random_state, stratify=y
-                )
-
-                # Refit base model on proper training set only
                 from sklearn.base import clone
 
+                X_proper, X_cal, y_proper, y_cal = self._split_for_calibration(X, y)
+
+                # Refit base model on proper training set only
                 self.base_estimator = clone(self.base_estimator)
                 self.base_estimator.fit(X_proper, y_proper)
 
@@ -155,11 +170,10 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
                 )
                 self.calibrator_.fit(p_cal, y_cal.values if hasattr(y_cal, "values") else y_cal)
             else:
-                # For cross-validation mode, use all data
-                # (simplified: could implement k-fold cross-calibration)
-                p_cal = self.base_estimator.predict_proba(X)[:, 1]
-                self.calibrator_ = RigorousVennABERSCalibrator(precision=3, use_cache=True)
-                self.calibrator_.fit(p_cal, y.values if hasattr(y, "values") else y)
+                raise NotImplementedError(
+                    "venn_abers_mode='cross' (k-fold cross-conformal) is not yet implemented. "
+                    "Use venn_abers_mode='inductive' instead."
+                )
 
         else:
             raise ValueError(f"Unknown calibration method: {self.method}")
@@ -483,7 +497,7 @@ def compare_calibration_methods(
     for method in methods:
         # Fit calibrator
         calibrator = MultiCalibrationWrapper(
-            base_estimator=model, method=method, cal_size=0.2, random_state=0
+            base_estimator=model, method=method, cal_size=0.2, random_state=RANDOM_SEED
         )
         calibrator.fit(X_cal, y_cal)
 

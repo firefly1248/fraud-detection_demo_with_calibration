@@ -160,7 +160,7 @@ class CatFeaturesEncoder(BaseEstimator, TransformerMixin):
             "backward_difference",
             "ordinal",
         }:
-            raise ValueError("Unknown stargegy")
+            raise ValueError("Unknown strategy")
 
     def fit(self, X: pd.DataFrame, y: tp.Optional[pd.Series] = None):
         cols_to_one_hot = [
@@ -529,9 +529,11 @@ class TimeWindowedTargetEncoder(BaseEstimator, TransformerMixin):
         # For training data, use expanding window (all past data) instead of fixed window
         # This maximizes information while still preventing leakage
         X_transformed = X.copy()
+        original_index = X.index
 
         # Sort by time for efficient expanding window computation
-        if not X_transformed[self.time_column].is_monotonic_increasing:
+        is_sorted = X_transformed[self.time_column].is_monotonic_increasing
+        if not is_sorted:
             sort_idx = X_transformed[self.time_column].argsort()
             X_sorted = X_transformed.iloc[sort_idx].reset_index(drop=True)
             y_sorted = y.iloc[sort_idx].reset_index(drop=True)
@@ -579,9 +581,10 @@ class TimeWindowedTargetEncoder(BaseEstimator, TransformerMixin):
 
                 X_sorted.loc[idx, col] = encoded_value
 
-        # Restore original order if data was sorted
-        if not X_transformed[self.time_column].is_monotonic_increasing:
-            X_sorted = X_sorted.iloc[sort_idx.argsort()].reset_index(drop=True)
+        # Restore original order if data was sorted, then restore original index
+        if not is_sorted:
+            X_sorted = X_sorted.iloc[sort_idx.argsort()]
+        X_sorted.index = original_index
 
         # Cast encoded columns to float so downstream code gets numeric dtype
         for col in self.cols:
@@ -591,3 +594,135 @@ class TimeWindowedTargetEncoder(BaseEstimator, TransformerMixin):
             print(f"TimeWindowedTargetEncoder fit_transform completed for {len(X_sorted)} rows")
 
         return X_sorted
+
+
+class FraudFeatureEngineer(BaseEstimator, TransformerMixin):
+    """
+    Stateful feature engineer for fraud detection and bid-win datasets.
+
+    Computes group statistics (e.g. mean TransactionAmt per card1) during
+    ``fit()`` and applies them via ``map()`` during ``transform()``.
+    This prevents group-level data leakage: test statistics are derived
+    from training data, not from the test set itself.
+
+    Pointwise features (log transforms, time decomposition, etc.) are
+    computed identically to the legacy ``prepare_and_extract_features``
+    static method and carry no leakage risk.
+
+    Unseen categories at transform time receive a global fallback
+    (mean / std computed over the entire training set).
+
+    Examples
+    --------
+    >>> engineer = FraudFeatureEngineer()
+    >>> X_train_eng = engineer.fit_transform(X_train)
+    >>> X_test_eng  = engineer.transform(X_test)   # uses train-derived stats
+    """
+
+    def fit(self, X: pd.DataFrame, y=None) -> "FraudFeatureEngineer":
+        """Compute and store group statistics from training data."""
+
+        # --- Fraud Detection ---
+        if "card1" in X.columns and "TransactionAmt" in X.columns:
+            stats = X.groupby("card1")["TransactionAmt"].agg(["mean", "std"])
+            self.card1_ta_mean_: tp.Dict = stats["mean"].to_dict()
+            self.card1_ta_std_: tp.Dict = stats["std"].to_dict()
+            self.global_ta_mean_: float = float(X["TransactionAmt"].mean())
+            self.global_ta_std_: float = float(X["TransactionAmt"].fillna(0).std())
+
+        # --- Bid-Win ---
+        if "hour" in X.columns and "price" in X.columns:
+            self.hour_price_mean_: tp.Dict = X.groupby("hour")["price"].mean().to_dict()
+            self.global_price_mean_: float = float(X["price"].mean())
+
+        if "dsp" in X.columns and "price" in X.columns:
+            dsp_stats = X.groupby("dsp")["price"].agg(["mean", "std"])
+            self.dsp_price_mean_: tp.Dict = dsp_stats["mean"].to_dict()
+            self.dsp_price_std_: tp.Dict = dsp_stats["std"].to_dict()
+            self.global_price_std_: float = float(X["price"].std())
+
+        return self
+
+    def transform(self, X: pd.DataFrame, y=None) -> pd.DataFrame:
+        """
+        Apply feature engineering using stored training statistics.
+
+        Group-aggregated columns use training-derived stats (no leakage).
+        Unseen categories fall back to the global training mean / std.
+        """
+        X_ = X.copy()
+
+        # === FRAUD DETECTION — pointwise ===
+        if "TransactionAmt" in X_.columns:
+            X_["TransactionAmt_log"] = np.log1p(X_["TransactionAmt"])
+            X_["TransactionAmt_decimal"] = X_["TransactionAmt"] - X_["TransactionAmt"].astype(int)
+
+        # === FRAUD DETECTION — group (uses training stats) ===
+        if hasattr(self, "card1_ta_mean_") and "card1" in X_.columns:
+            X_["TransactionAmt_mean_card1"] = (
+                X_["card1"].map(self.card1_ta_mean_).fillna(self.global_ta_mean_)
+            )
+            X_["TransactionAmt_std_card1"] = (
+                X_["card1"].map(self.card1_ta_std_).fillna(self.global_ta_std_)
+            )
+
+        if "TransactionDT" in X_.columns:
+            X_["TransactionDT_hour"] = (X_["TransactionDT"] % 86400) // 3600
+            X_["TransactionDT_day"] = X_["TransactionDT"] // 86400
+            X_["TransactionDT_weekday"] = (X_["TransactionDT"] // 86400) % 7
+
+        if "P_emaildomain" in X_.columns and "R_emaildomain" in X_.columns:
+            X_["email_domain_match"] = (X_["P_emaildomain"] == X_["R_emaildomain"]).astype(int)
+            X_["email_domain_missing"] = (
+                X_["P_emaildomain"].isnull() | X_["R_emaildomain"].isnull()
+            ).astype(int)
+
+        if "dist1" in X_.columns and "dist2" in X_.columns:
+            X_["dist_ratio"] = X_["dist1"] / (X_["dist2"] + 1e-5)
+
+        d_cols = [f"D{i}" for i in range(1, 16) if f"D{i}" in X_.columns]
+        if d_cols:
+            X_["D_missing_count"] = X_[d_cols].isnull().sum(axis=1)
+
+        if "addr1" in X_.columns and "addr2" in X_.columns:
+            X_["addr_match"] = (X_["addr1"] == X_["addr2"]).astype(int)
+
+        m_cols = [f"M{i}" for i in range(1, 10) if f"M{i}" in X_.columns]
+        if m_cols:
+            X_["M_true_count"] = (X_[m_cols] == "T").sum(axis=1)
+
+        # === BID-WIN — pointwise ===
+        if "lang" in X_.columns:
+            X_["lang"] = X_["lang"].apply(
+                lambda x: x.split("_")[0].split("-")[0] if isinstance(x, str) else x
+            )
+
+        if "price" in X_.columns and "flr" in X_.columns:
+            X_["price_to_flr_ratio"] = X_["price"] / X_["flr"]
+
+        if "price" in X_.columns and "sellerClearPrice" in X_.columns:
+            X_["price_to_sellerClearPrice_ratio"] = X_["price"] / X_["sellerClearPrice"]
+
+        # === BID-WIN — group (uses training stats) ===
+        if hasattr(self, "hour_price_mean_") and "hour" in X_.columns:
+            X_["avg_price_by_hour"] = (
+                X_["hour"].map(self.hour_price_mean_).fillna(self.global_price_mean_)
+            )
+
+        if hasattr(self, "dsp_price_mean_") and "dsp" in X_.columns:
+            X_["price_std_by_dsp"] = (
+                X_["dsp"].map(self.dsp_price_std_).fillna(self.global_price_std_)
+            )
+            X_["avg_price_by_dsp"] = (
+                X_["dsp"].map(self.dsp_price_mean_).fillna(self.global_price_mean_)
+            )
+
+        if "request_context_device_h" in X_.columns and "request_context_device_w" in X_.columns:
+            X_.loc[X_["request_context_device_h"] == 0, "request_context_device_h"] = np.nan
+            X_.loc[X_["request_context_device_w"] == 0, "request_context_device_w"] = np.nan
+            X_["screen_ratio"] = X_["request_context_device_w"] / X_["request_context_device_h"]
+            X_["screen_diagonal"] = np.sqrt(
+                X_["request_context_device_w"] ** 2 + X_["request_context_device_h"] ** 2
+            )
+
+        return X_

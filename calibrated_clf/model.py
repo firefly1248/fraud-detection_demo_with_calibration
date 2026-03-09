@@ -43,8 +43,8 @@ from lightgbm import LGBMClassifier
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.pipeline import Pipeline
 
-from .config import MODEL_FIXED_PARAMS
-from .data_transformers import CatFeaturesEncoder, FieldsToCategory
+from .config import MODEL_FIXED_PARAMS, MODEL_DEFAULT_VARIABLE_PARAMS
+from .data_transformers import CatFeaturesEncoder, FieldsToCategory, FraudFeatureEngineer
 from .calibration import MultiCalibrationWrapper
 
 # Type aliases for clarity
@@ -164,17 +164,18 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
 
     def __init__(
         self,
-        variable_params: ModelParams,
+        variable_params: tp.Optional[ModelParams] = None,
         calibration_method: str = "isotonic",
         calibration_params: tp.Optional[ModelParams] = None,
     ) -> None:
-        self.variable_params = variable_params
+        self.variable_params = variable_params or MODEL_DEFAULT_VARIABLE_PARAMS
         self.calibration_method = calibration_method
         self.calibration_params = calibration_params or {}
 
         # Attributes set during fit (trailing underscore per sklearn convention)
         self.model_: tp.Optional[Pipeline] = None
         self.calibrated_model_: tp.Optional[MultiCalibrationWrapper] = None
+        self.feature_engineer_: tp.Optional[FraudFeatureEngineer] = None
         self.features_: tp.Optional[Features] = None
         self.feature_importances_: tp.Optional[np.ndarray] = None
         self.classes_: tp.Optional[np.ndarray] = None
@@ -414,23 +415,46 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
                 f"Target must be binary. Found {len(unique_classes)} classes: {unique_classes}"
             )
 
+        # Feature engineering (stateful — group stats are fitted on training data only,
+        # so transform() at prediction time never leaks test-set information).
+        # If X was already engineered externally (group features present), we still fit
+        # the engineer so that predict() can apply the same training stats to raw inputs.
+        self.feature_engineer_ = FraudFeatureEngineer()
+        _already_engineered = ("TransactionAmt_mean_card1" in X.columns) or (
+            "avg_price_by_dsp" in X.columns
+        )
+        if _already_engineered:
+            # Store training-derived stats without re-computing pointwise features
+            self.feature_engineer_.fit(X)
+        else:
+            X = self.feature_engineer_.fit_transform(X)
+
         # Detect categorical features
-        categorical_features = X.select_dtypes(include=["object", "category"]).columns.tolist()
+        categorical_features = X.select_dtypes(
+            include=["object", "category", "string"]
+        ).columns.tolist()
 
-        # Build and fit base model
+        # Build base model (unfitted — MultiCalibrationWrapper handles the actual fitting
+        # so the model is trained on the correct data split for each calibration method)
         self.model_ = self.build_model(self.variable_params, categorical_features)
-        self.model_.fit(X, y)
 
-        # Store metadata
-        self.features_ = X.columns.tolist()
-        self.classes_ = self.model_.named_steps["classifier"].classes_
-        self.feature_importances_ = self.model_.named_steps["classifier"].feature_importances_
+        # For 'none' calibration the wrapper returns immediately without refitting,
+        # so we must pre-fit on full data before handing it over.
+        if self.calibration_method in (None, "none"):
+            self.model_.fit(X, y)
 
-        # Apply calibration
+        # Apply calibration (for non-'none' methods this clones the base model,
+        # performs the calibration split, and refits on the proper training portion)
         self.calibrated_model_ = MultiCalibrationWrapper(
             base_estimator=self.model_, method=self.calibration_method, **self.calibration_params
         )
         self.calibrated_model_.fit(X, y)
+
+        # Extract metadata from the model that is actually used for predictions
+        fitted_base = self.calibrated_model_.base_estimator
+        self.features_ = X.columns.tolist()
+        self.classes_ = fitted_base.named_steps["classifier"].classes_
+        self.feature_importances_ = fitted_base.named_steps["classifier"].feature_importances_
 
         self.is_fitted_ = True
         return self
@@ -454,7 +478,9 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
         """
         missing_features = set(self.features_) - set(X.columns)
         if len(missing_features) > 0:
-            return self.prepare_and_extract_features(X)
+            # Use the fitted engineer so predictions always apply training-derived
+            # group statistics (no leakage from test data).
+            return self.feature_engineer_.transform(X)
         return X
 
     @check_is_fitted
