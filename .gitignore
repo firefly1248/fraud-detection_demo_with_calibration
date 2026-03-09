@@ -102,5 +102,5 @@ optuna.db
 # SHAP cache
 .shap_cache/
 
-# Claude Code documentation (internal use only)
-CLAUDE.md
+# Claude Code project instructions — intentionally included as best practice
+# See: https://docs.anthropic.com/en/docs/claude-code/memory
