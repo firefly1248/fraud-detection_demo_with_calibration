@@ -17,13 +17,9 @@ class MissingDataHandler(BaseEstimator, TransformerMixin):
         self.add_missing_indicator = add_missing_indicator
         self.fill_value = fill_value
         if strategy == "mean":
-            self.imputer = imputation.MeanMedianImputer(
-                imputation_method="mean", variables=cols
-            )
+            self.imputer = imputation.MeanMedianImputer(imputation_method="mean", variables=cols)
         elif strategy == "median":
-            self.imputer = imputation.MeanMedianImputer(
-                imputation_method="median", variables=cols
-            )
+            self.imputer = imputation.MeanMedianImputer(imputation_method="median", variables=cols)
         elif strategy == "frequent":
             self.imputer = imputation.CategoricalImputer(
                 imputation_method="frequent", variables=cols, ignore_format=True
@@ -66,8 +62,7 @@ class EndOfTailImputer(BaseEstimator, TransformerMixin):
         if isinstance(self.cols, type(None)):
             self.cols = list(X.select_dtypes(include="number").columns)
         self.imputer_dict_ = (
-            X[self.cols].min()
-            - 2 * (X[self.cols].quantile(0.75) - X[self.cols].quantile(0.25))
+            X[self.cols].min() - 2 * (X[self.cols].quantile(0.75) - X[self.cols].quantile(0.25))
         ).to_dict()
         return self
 
@@ -169,13 +164,9 @@ class CatFeaturesEncoder(BaseEstimator, TransformerMixin):
 
     def fit(self, X: pd.DataFrame, y: tp.Optional[pd.Series] = None):
         cols_to_one_hot = [
-            c
-            for c in self.cols
-            if len(X[c].unique()) <= self.max_cardinality_to_one_hot
+            c for c in self.cols if len(X[c].unique()) <= self.max_cardinality_to_one_hot
         ]
-        cols_to_encode_single_column = [
-            c for c in self.cols if c not in cols_to_one_hot
-        ]
+        cols_to_encode_single_column = [c for c in self.cols if c not in cols_to_one_hot]
         self.use_one_hot = len(cols_to_one_hot) > 0
         self.use_single_columns_encoding = len(cols_to_encode_single_column) > 0
         if self.use_one_hot:
@@ -217,11 +208,9 @@ class CatFeaturesEncoder(BaseEstimator, TransformerMixin):
                     handle_missing=self.handle_missing,
                 )
             elif self.strategy == "backward_difference":
-                self.handler = (
-                    category_encoders.backward_difference.BackwardDifferenceEncoder(
-                        cols=cols_to_encode_single_column,
-                        handle_missing=self.handle_missing,
-                    )
+                self.handler = category_encoders.backward_difference.BackwardDifferenceEncoder(
+                    cols=cols_to_encode_single_column,
+                    handle_missing=self.handle_missing,
                 )
             elif self.strategy == "ordinal":
                 self.handler = category_encoders.ordinal.OrdinalEncoder(
@@ -448,12 +437,15 @@ class TimeWindowedTargetEncoder(BaseEstimator, TransformerMixin):
             )
 
         if self.time_column not in X.columns:
-            raise ValueError(
-                f"time_column '{self.time_column}' not found in X during transform"
-            )
+            raise ValueError(f"time_column '{self.time_column}' not found in X during transform")
 
         X_transformed = X.copy()
         time_window_delta = self._normalize_time_window()
+
+        # Convert categorical columns to object dtype to allow float assignment
+        # (pandas 3.x infers string columns as StringDtype which rejects float values)
+        for col in self.cols:
+            X_transformed[col] = X_transformed[col].astype(object)
 
         # Process each row individually to compute encoding based on its timestamp
         for idx in X_transformed.index:
@@ -461,9 +453,8 @@ class TimeWindowedTargetEncoder(BaseEstimator, TransformerMixin):
             window_start = current_time - time_window_delta
 
             # Filter training data to time window [window_start, current_time)
-            mask = (
-                (self.X_train_[self.time_column] >= window_start) &
-                (self.X_train_[self.time_column] < current_time)
+            mask = (self.X_train_[self.time_column] >= window_start) & (
+                self.X_train_[self.time_column] < current_time
             )
             X_window = self.X_train_[mask]
             y_window = self.y_train_[mask]
@@ -494,17 +485,23 @@ class TimeWindowedTargetEncoder(BaseEstimator, TransformerMixin):
                     # Apply smoothing: (count * cat_mean + smoothing * global_mean) / (count + smoothing)
                     count = len(y_category)
                     cat_mean = float(y_category.mean())
-                    encoded_value = (
-                        count * cat_mean + self.smoothing * self.global_mean_
-                    ) / (count + self.smoothing)
+                    encoded_value = (count * cat_mean + self.smoothing * self.global_mean_) / (
+                        count + self.smoothing
+                    )
 
                 X_transformed.loc[idx, col] = encoded_value
+
+        # Cast encoded columns to float so downstream code gets numeric dtype
+        for col in self.cols:
+            X_transformed[col] = X_transformed[col].astype(float)
 
         if self.verbose:
             print(f"TimeWindowedTargetEncoder transformed {len(X_transformed)} rows")
             for col in self.cols:
-                print(f"  - {col}: mean={X_transformed[col].mean():.4f}, "
-                      f"std={X_transformed[col].std():.4f}")
+                print(
+                    f"  - {col}: mean={X_transformed[col].mean():.4f}, "
+                    f"std={X_transformed[col].std():.4f}"
+                )
 
         return X_transformed
 
@@ -542,6 +539,11 @@ class TimeWindowedTargetEncoder(BaseEstimator, TransformerMixin):
             X_sorted = X_transformed.reset_index(drop=True)
             y_sorted = y.reset_index(drop=True)
 
+        # Convert categorical columns to object dtype to allow float assignment
+        # (pandas 3.x infers string columns as StringDtype which rejects float values)
+        for col in self.cols:
+            X_sorted[col] = X_sorted[col].astype(object)
+
         # Process each row with expanding window
         for idx in range(len(X_sorted)):
             if idx == 0:
@@ -571,15 +573,19 @@ class TimeWindowedTargetEncoder(BaseEstimator, TransformerMixin):
                 else:
                     count = len(y_category)
                     cat_mean = float(y_category.mean())
-                    encoded_value = (
-                        count * cat_mean + self.smoothing * self.global_mean_
-                    ) / (count + self.smoothing)
+                    encoded_value = (count * cat_mean + self.smoothing * self.global_mean_) / (
+                        count + self.smoothing
+                    )
 
                 X_sorted.loc[idx, col] = encoded_value
 
         # Restore original order if data was sorted
         if not X_transformed[self.time_column].is_monotonic_increasing:
             X_sorted = X_sorted.iloc[sort_idx.argsort()].reset_index(drop=True)
+
+        # Cast encoded columns to float so downstream code gets numeric dtype
+        for col in self.cols:
+            X_sorted[col] = X_sorted[col].astype(float)
 
         if self.verbose:
             print(f"TimeWindowedTargetEncoder fit_transform completed for {len(X_sorted)} rows")

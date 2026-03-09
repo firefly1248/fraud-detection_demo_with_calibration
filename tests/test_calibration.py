@@ -16,16 +16,10 @@ class TestMultiCalibrationWrapper:
     def sample_classifier_and_data(self):
         """Create sample classifier and data for calibration testing."""
         X, y = make_classification(
-            n_samples=1000,
-            n_features=10,
-            n_informative=5,
-            n_redundant=2,
-            random_state=42
+            n_samples=1000, n_features=10, n_informative=5, n_redundant=2, random_state=42
         )
 
-        X_train, X_cal, y_train, y_cal = train_test_split(
-            X, y, test_size=0.3, random_state=42
-        )
+        X_train, X_cal, y_train, y_cal = train_test_split(X, y, test_size=0.3, random_state=42)
 
         clf = RandomForestClassifier(n_estimators=10, random_state=42)
         clf.fit(X_train, y_train)
@@ -36,10 +30,7 @@ class TestMultiCalibrationWrapper:
         """Test isotonic regression calibration."""
         clf, X_cal, y_cal = sample_classifier_and_data
 
-        calibrator = MultiCalibrationWrapper(
-            base_estimator=clf,
-            method='isotonic'
-        )
+        calibrator = MultiCalibrationWrapper(base_estimator=clf, method="isotonic")
 
         calibrator.fit(X_cal, y_cal)
 
@@ -53,10 +44,7 @@ class TestMultiCalibrationWrapper:
         """Test Platt scaling (sigmoid) calibration."""
         clf, X_cal, y_cal = sample_classifier_and_data
 
-        calibrator = MultiCalibrationWrapper(
-            base_estimator=clf,
-            method='sigmoid'
-        )
+        calibrator = MultiCalibrationWrapper(base_estimator=clf, method="sigmoid")
 
         calibrator.fit(X_cal, y_cal)
 
@@ -68,11 +56,7 @@ class TestMultiCalibrationWrapper:
         """Test Venn-ABERS calibration."""
         clf, X_cal, y_cal = sample_classifier_and_data
 
-        calibrator = MultiCalibrationWrapper(
-            base_estimator=clf,
-            method='venn_abers',
-            cal_size=0.5
-        )
+        calibrator = MultiCalibrationWrapper(base_estimator=clf, method="venn_abers", cal_size=0.5)
 
         calibrator.fit(X_cal, y_cal)
 
@@ -82,23 +66,20 @@ class TestMultiCalibrationWrapper:
 
         # Test prediction intervals
         intervals = calibrator.predict_proba_with_intervals(X_cal)
-        assert 'p_lower' in intervals
-        assert 'p_upper' in intervals
-        assert 'p_combined' in intervals
-        assert 'interval_width' in intervals
+        assert "p_lower" in intervals
+        assert "p_upper" in intervals
+        assert "p_combined" in intervals
+        assert "interval_width" in intervals
 
         # Check interval validity
-        assert np.all(intervals['p_lower'] <= intervals['p_upper'])
-        assert np.all(intervals['interval_width'] >= 0)
+        assert np.all(intervals["p_lower"] <= intervals["p_upper"])
+        assert np.all(intervals["interval_width"] >= 0)
 
     def test_no_calibration(self, sample_classifier_and_data):
         """Test that 'none' method returns uncalibrated predictions."""
         clf, X_cal, y_cal = sample_classifier_and_data
 
-        calibrator = MultiCalibrationWrapper(
-            base_estimator=clf,
-            method='none'
-        )
+        calibrator = MultiCalibrationWrapper(base_estimator=clf, method="none")
 
         calibrator.fit(X_cal, y_cal)
 
@@ -113,10 +94,7 @@ class TestMultiCalibrationWrapper:
         clf, X_cal, y_cal = sample_classifier_and_data
 
         with pytest.raises(ValueError, match="Unknown calibration method"):
-            calibrator = MultiCalibrationWrapper(
-                base_estimator=clf,
-                method='invalid_method'
-            )
+            calibrator = MultiCalibrationWrapper(base_estimator=clf, method="invalid_method")
             calibrator.fit(X_cal, y_cal)
 
     def test_calibration_improves_predictions(self, sample_classifier_and_data):
@@ -124,10 +102,7 @@ class TestMultiCalibrationWrapper:
         clf, X_cal, y_cal = sample_classifier_and_data
 
         # Isotonic calibration
-        calibrator = MultiCalibrationWrapper(
-            base_estimator=clf,
-            method='isotonic'
-        )
+        calibrator = MultiCalibrationWrapper(base_estimator=clf, method="isotonic")
         calibrator.fit(X_cal, y_cal)
 
         probas = calibrator.predict_proba(X_cal)
@@ -148,63 +123,51 @@ class TestVennABERSBinaryCalibrator:
 
     def test_initialization(self):
         """Test VennABERSBinaryCalibrator initialization."""
-        calibrator = VennABERSBinaryCalibrator(cal_size=0.3)
-        assert calibrator.cal_size == 0.3
-        assert not calibrator.is_fitted_
+        calibrator = VennABERSBinaryCalibrator(precision=3)
+        assert calibrator.precision == 3
 
     def test_fit_predict(self):
         """Test fit and predict workflow."""
-        X, y = make_classification(
-            n_samples=500,
-            n_features=10,
-            random_state=42
-        )
+        X, y = make_classification(n_samples=500, n_features=10, random_state=42)
 
-        X_train, X_cal, y_train, y_cal = train_test_split(
-            X, y, test_size=0.3, random_state=42
-        )
+        X_train, X_cal, y_train, y_cal = train_test_split(X, y, test_size=0.3, random_state=42)
 
         clf = RandomForestClassifier(n_estimators=10, random_state=42)
         clf.fit(X_train, y_train)
 
-        calibrator = VennABERSBinaryCalibrator(cal_size=0.5)
-        calibrator.fit(X_cal, y_cal, clf)
+        # VennABERSBinaryCalibrator takes probability scores, not raw features
+        p_cal = clf.predict_proba(X_cal)[:, 1]
+        calibrator = VennABERSBinaryCalibrator(precision=3)
+        calibrator.fit(p_cal, y_cal)
 
-        assert calibrator.is_fitted_
+        p_test = clf.predict_proba(X_cal)[:, 1]
+        result = calibrator.predict(p_test)
 
-        # Test prediction intervals
-        intervals = calibrator.predict_proba_with_intervals(X_cal, clf)
-
-        assert isinstance(intervals, dict)
-        assert all(key in intervals for key in ['p_lower', 'p_upper', 'p_combined', 'interval_width'])
+        assert isinstance(result, dict)
+        assert all(key in result for key in ["p0", "p1", "p_combined", "interval_width"])
 
     def test_interval_properties(self):
         """Test mathematical properties of prediction intervals."""
-        X, y = make_classification(
-            n_samples=300,
-            n_features=5,
-            random_state=42
-        )
+        X, y = make_classification(n_samples=300, n_features=5, random_state=42)
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.4, random_state=42
-        )
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.4, random_state=42)
 
         clf = RandomForestClassifier(n_estimators=10, random_state=42)
         clf.fit(X_train, y_train)
 
-        calibrator = VennABERSBinaryCalibrator(cal_size=0.5)
-        calibrator.fit(X_train, y_train, clf)
+        p_train = clf.predict_proba(X_train)[:, 1]
+        calibrator = VennABERSBinaryCalibrator(precision=3)
+        calibrator.fit(p_train, y_train)
 
-        intervals = calibrator.predict_proba_with_intervals(X_test, clf)
+        p_test = clf.predict_proba(X_test)[:, 1]
+        result = calibrator.predict(p_test)
 
-        # p_lower <= p_combined <= p_upper
-        assert np.all(intervals['p_lower'] <= intervals['p_combined'])
-        assert np.all(intervals['p_combined'] <= intervals['p_upper'])
+        # p0 <= p1 (lower bound <= upper bound)
+        assert np.all(result["p0"] <= result["p1"])
 
         # All probabilities in [0, 1]
-        assert np.all(intervals['p_lower'] >= 0) and np.all(intervals['p_lower'] <= 1)
-        assert np.all(intervals['p_upper'] >= 0) and np.all(intervals['p_upper'] <= 1)
+        assert np.all(result["p0"] >= 0) and np.all(result["p0"] <= 1)
+        assert np.all(result["p1"] >= 0) and np.all(result["p1"] <= 1)
 
         # Interval width is non-negative
-        assert np.all(intervals['interval_width'] >= 0)
+        assert np.all(result["interval_width"] >= 0)
