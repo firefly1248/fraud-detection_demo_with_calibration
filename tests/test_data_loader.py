@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.data_loader import create_time_groups, get_categorical_features
+from calibrated_clf.data_loader import create_time_groups, get_categorical_features
 
 
 class TestCreateTimeGroups:

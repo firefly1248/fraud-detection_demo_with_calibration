@@ -37,7 +37,7 @@ jobs:
 
     - name: Run tests with pytest
       run: |
-        pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+        pytest tests/ -v --cov=calibrated_clf --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -65,11 +65,11 @@ jobs:
 
     - name: Check code formatting with black
       run: |
-        black --check src/ tests/ --line-length 100
+        black --check calibrated_clf/ tests/ --line-length 100
 
     - name: Type check with mypy
       run: |
-        mypy src/ --ignore-missing-imports
+        mypy calibrated_clf/ --ignore-missing-imports
       continue-on-error: true  # Don't fail CI on type errors initially
 
   docs-check:
@@ -93,4 +93,4 @@ jobs:
 
     - name: Check Python files compile
       run: |
-        python -m py_compile src/*.py
+        python -m py_compile calibrated_clf/*.py

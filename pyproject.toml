@@ -1,5 +1,6 @@
 [tool.poetry]
-name = "calibrated-binary-classifier"
+name = "calibrated-clf"
+packages = [{include = "calibrated_clf"}]
 version = "1.0.0"
 description = "Production-ready binary classification framework with advanced calibration (Venn-ABERS, isotonic) and temporal validation"
 authors = ["Ekhlakov Ilia"]

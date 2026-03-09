@@ -5,7 +5,11 @@ import pandas as pd
 import pytest
 from datetime import timedelta
 
-from src.data_transformers import TimeWindowedTargetEncoder, CatFeaturesEncoder, MissingDataHandler
+from calibrated_clf.data_transformers import (
+    TimeWindowedTargetEncoder,
+    CatFeaturesEncoder,
+    MissingDataHandler,
+)
 
 
 class TestTimeWindowedTargetEncoder:

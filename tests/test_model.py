@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from sklearn.exceptions import NotFittedError
 
-from src.model import CalibratedBinaryClassifier, BidWinModel
+from calibrated_clf.model import CalibratedBinaryClassifier, BidWinModel
 
 
 class TestCalibratedBinaryClassifier:
