@@ -112,10 +112,7 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
             from sklearn.base import clone
 
             X_proper, X_cal, y_proper, y_cal = train_test_split(
-                X, y,
-                test_size=self.cal_size,
-                random_state=self.random_state,
-                stratify=y
+                X, y, test_size=self.cal_size, random_state=self.random_state, stratify=y
             )
 
             # Refit the base model on the proper training set only
@@ -124,9 +121,7 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
 
             # Fit the calibration layer on the held-out set
             self.calibrator_ = CalibratedClassifierCV(
-                estimator=self.base_estimator,
-                method=self.method,
-                cv="prefit"
+                estimator=self.base_estimator, method=self.method, cv="prefit"
             )
             self.calibrator_.fit(X_cal, y_cal)
 
@@ -140,14 +135,12 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
             if self.venn_abers_mode == "inductive":
                 # Split data for inductive calibration
                 X_proper, X_cal, y_proper, y_cal = train_test_split(
-                    X, y,
-                    test_size=self.cal_size,
-                    random_state=self.random_state,
-                    stratify=y
+                    X, y, test_size=self.cal_size, random_state=self.random_state, stratify=y
                 )
 
                 # Refit base model on proper training set only
                 from sklearn.base import clone
+
                 self.base_estimator = clone(self.base_estimator)
                 self.base_estimator.fit(X_proper, y_proper)
 
@@ -158,18 +151,15 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
                 # Note: This is slower but mathematically correct
                 self.calibrator_ = RigorousVennABERSCalibrator(
                     precision=3,  # Round to 3 decimals for speed
-                    use_cache=True  # Cache results for repeated values
+                    use_cache=True,  # Cache results for repeated values
                 )
-                self.calibrator_.fit(p_cal, y_cal.values if hasattr(y_cal, 'values') else y_cal)
+                self.calibrator_.fit(p_cal, y_cal.values if hasattr(y_cal, "values") else y_cal)
             else:
                 # For cross-validation mode, use all data
                 # (simplified: could implement k-fold cross-calibration)
                 p_cal = self.base_estimator.predict_proba(X)[:, 1]
-                self.calibrator_ = RigorousVennABERSCalibrator(
-                    precision=3,
-                    use_cache=True
-                )
-                self.calibrator_.fit(p_cal, y.values if hasattr(y, 'values') else y)
+                self.calibrator_ = RigorousVennABERSCalibrator(precision=3, use_cache=True)
+                self.calibrator_.fit(p_cal, y.values if hasattr(y, "values") else y)
 
         else:
             raise ValueError(f"Unknown calibration method: {self.method}")
@@ -194,7 +184,7 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
 
             # Then calibrate them
             va_output = self.calibrator_.predict(p_test)
-            p1_combined = va_output['p_combined']
+            p1_combined = va_output["p_combined"]
 
             # Return in sklearn format: [P(class=0), P(class=1)]
             p0_combined = 1 - p1_combined
@@ -222,11 +212,11 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
             proba = self.predict_proba(X)
             p1 = proba[:, 1]
             return {
-                'p_lower': p1,
-                'p_upper': p1,
-                'p_combined': p1,
-                'interval_width': np.zeros_like(p1),
-                'proba': proba
+                "p_lower": p1,
+                "p_upper": p1,
+                "p_combined": p1,
+                "interval_width": np.zeros_like(p1),
+                "proba": proba,
             }
 
         # For manual Venn-ABERS, first get predictions from base estimator
@@ -235,20 +225,20 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
         # Then get calibrated intervals
         va_output = self.calibrator_.predict(p_test)
 
-        p0 = va_output['p0']
-        p1 = va_output['p1']
-        p_combined = va_output['p_combined']
-        interval_width = va_output['interval_width']
+        p0 = va_output["p0"]
+        p1 = va_output["p1"]
+        p_combined = va_output["p_combined"]
+        interval_width = va_output["interval_width"]
 
         # Create full probability array [P(class=0), P(class=1)]
         proba_full = np.column_stack([1 - p_combined, p_combined])
 
         return {
-            'p_lower': p0,
-            'p_upper': p1,
-            'p_combined': p_combined,
-            'interval_width': interval_width,
-            'proba': proba_full
+            "p_lower": p0,
+            "p_upper": p1,
+            "p_combined": p_combined,
+            "interval_width": interval_width,
+            "proba": proba_full,
         }
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
@@ -293,13 +283,13 @@ class VennABERSBinaryCalibrator(BaseEstimator):
         # Isotonic regressor assuming all test points are class 0
         p_cal_0 = np.concatenate([p_cal, [0]])
         y_cal_0 = np.concatenate([y_cal, [0]])
-        self.iso_regressor_0_ = IsotonicRegression(out_of_bounds='clip')
+        self.iso_regressor_0_ = IsotonicRegression(out_of_bounds="clip")
         self.iso_regressor_0_.fit(p_cal_0, y_cal_0)
 
         # Isotonic regressor assuming all test points are class 1
         p_cal_1 = np.concatenate([p_cal, [1]])
         y_cal_1 = np.concatenate([y_cal, [1]])
-        self.iso_regressor_1_ = IsotonicRegression(out_of_bounds='clip')
+        self.iso_regressor_1_ = IsotonicRegression(out_of_bounds="clip")
         self.iso_regressor_1_.fit(p_cal_1, y_cal_1)
 
         return self
@@ -333,12 +323,7 @@ class VennABERSBinaryCalibrator(BaseEstimator):
         # Interval width (uncertainty measure)
         interval_width = p1 - p0
 
-        return {
-            'p0': p0,
-            'p1': p1,
-            'p_combined': p_combined,
-            'interval_width': interval_width
-        }
+        return {"p0": p0, "p1": p1, "p_combined": p_combined, "interval_width": interval_width}
 
 
 class RigorousVennABERSCalibrator(BaseEstimator):
@@ -434,7 +419,7 @@ class RigorousVennABERSCalibrator(BaseEstimator):
             else:
                 p_cal_0 = np.concatenate([self.p_cal_, [p_t]])
                 y_cal_0 = np.concatenate([self.y_cal_, [0]])
-                iso_0 = IsotonicRegression(out_of_bounds='clip')
+                iso_0 = IsotonicRegression(out_of_bounds="clip")
                 iso_0.fit(p_cal_0, y_cal_0)
                 p0[i] = iso_0.predict([p_t])[0]
 
@@ -447,7 +432,7 @@ class RigorousVennABERSCalibrator(BaseEstimator):
             else:
                 p_cal_1 = np.concatenate([self.p_cal_, [p_t]])
                 y_cal_1 = np.concatenate([self.y_cal_, [1]])
-                iso_1 = IsotonicRegression(out_of_bounds='clip')
+                iso_1 = IsotonicRegression(out_of_bounds="clip")
                 iso_1.fit(p_cal_1, y_cal_1)
                 p1[i] = iso_1.predict([p_t])[0]
 
@@ -465,12 +450,7 @@ class RigorousVennABERSCalibrator(BaseEstimator):
         # Interval width (uncertainty measure)
         interval_width = np.maximum(p1 - p0, 0)
 
-        return {
-            'p0': p0,
-            'p1': p1,
-            'p_combined': p_combined,
-            'interval_width': interval_width
-        }
+        return {"p0": p0, "p1": p1, "p_combined": p_combined, "interval_width": interval_width}
 
 
 def compare_calibration_methods(
@@ -503,10 +483,7 @@ def compare_calibration_methods(
     for method in methods:
         # Fit calibrator
         calibrator = MultiCalibrationWrapper(
-            base_estimator=model,
-            method=method,
-            cal_size=0.2,
-            random_state=0
+            base_estimator=model, method=method, cal_size=0.2, random_state=0
         )
         calibrator.fit(X_cal, y_cal)
 
@@ -520,21 +497,23 @@ def compare_calibration_methods(
 
         # Calibration curve (Expected Calibration Error)
         prob_true, prob_pred = calibration_curve(
-            y_test, y_pred_proba, n_bins=10, strategy='quantile'
+            y_test, y_pred_proba, n_bins=10, strategy="quantile"
         )
         ece = np.mean(np.abs(prob_true - prob_pred))
 
         # For Venn-ABERS, also track interval width
         interval_info = calibrator.predict_proba_with_intervals(X_test)
-        avg_interval_width = interval_info['interval_width'].mean()
+        avg_interval_width = interval_info["interval_width"].mean()
 
-        results.append({
-            'method': method,
-            'brier_score': brier,
-            'log_loss': logloss,
-            'auc_roc': auc_roc,
-            'ece': ece,
-            'avg_interval_width': avg_interval_width
-        })
+        results.append(
+            {
+                "method": method,
+                "brier_score": brier,
+                "log_loss": logloss,
+                "auc_roc": auc_roc,
+                "ece": ece,
+                "avg_interval_width": avg_interval_width,
+            }
+        )
 
     return pd.DataFrame(results)

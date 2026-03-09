@@ -49,26 +49,18 @@ def optimize_model(
             "boosting_type": trial.suggest_categorical(
                 "classifier__boosting_type", ["gbdt", "goss", "dart"]
             ),
-            "learning_rate": trial.suggest_float(
-                "classifier__learning_rate", 1e-3, 1.0, log=True
-            ),
+            "learning_rate": trial.suggest_float("classifier__learning_rate", 1e-3, 1.0, log=True),
             "max_depth": trial.suggest_int("classifier__max_depth", 3, 8),
             # "objective": trial.suggest_categorical("classifier__objective", ["binary", "cross_entropy"]),
-            "reg_alpha": trial.suggest_float(
-                "classifier__reg_alpha", 1e-8, 1e4, log=True
-            ),
-            "reg_lambda": trial.suggest_float(
-                "classifier__reg_lambda", 1e-8, 1e4, log=True
-            ),
+            "reg_alpha": trial.suggest_float("classifier__reg_alpha", 1e-8, 1e4, log=True),
+            "reg_lambda": trial.suggest_float("classifier__reg_lambda", 1e-8, 1e4, log=True),
             "n_estimators": trial.suggest_int("classifier__n_estimators", 50, 200),
             # "linear_tree ": trial.suggest_categorical("classifier__linear_tree", [True, False]),
             # "max_bins": trial.suggest_int("classifier__max_bins", 32, 512, log=True),
             "min_split_gain": trial.suggest_float(
                 "classifier__min_split_gain", 1e-8, 1.0, log=True
             ),
-            "colsample_bytree": trial.suggest_float(
-                "classifier__colsample_bytree", 0.3, 1.0
-            ),
+            "colsample_bytree": trial.suggest_float("classifier__colsample_bytree", 0.3, 1.0),
             "num_leaves": trial.suggest_int("classifier__num_leaves", 16, 128),
         }
 
@@ -87,7 +79,7 @@ def optimize_model(
                     #'glmme',
                     "james_stein",
                     #'backward_difference',
-                    'm_estimate',
+                    "m_estimate",
                     #'polynomial',
                     "target_encoder",
                     # "ordinal",

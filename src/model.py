@@ -47,7 +47,6 @@ from .config import MODEL_FIXED_PARAMS
 from .data_transformers import CatFeaturesEncoder, FieldsToCategory
 from .calibration import MultiCalibrationWrapper
 
-
 # Type aliases for clarity
 ModelParams = tp.Dict[str, tp.Any]
 Features = tp.List[str]
@@ -67,13 +66,13 @@ def check_is_fitted(func: tp.Callable) -> tp.Callable:
     Raises:
         ValueError: If model is not fitted
     """
+
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         if not getattr(self, "is_fitted_", False):
-            raise ValueError(
-                f"Model is not fitted yet. Call fit() before using {func.__name__}()."
-            )
+            raise ValueError(f"Model is not fitted yet. Call fit() before using {func.__name__}().")
         return func(self, *args, **kwargs)
+
     return wrapper
 
 
@@ -234,10 +233,9 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
 
             # Convert to category dtype if using ordinal encoding
             if cat_encoder_params.get("strategy") == "ordinal":
-                steps.append((
-                    "ordinal_to_category",
-                    FieldsToCategory(variables=categorical_features)
-                ))
+                steps.append(
+                    ("ordinal_to_category", FieldsToCategory(variables=categorical_features))
+                )
 
         steps.append(("classifier", LGBMClassifier(**classifier_params)))
 
@@ -305,38 +303,32 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
         X_ = X.copy()
 
         # === FRAUD DETECTION FEATURES ===
-        if 'TransactionAmt' in X_.columns:
+        if "TransactionAmt" in X_.columns:
             # Transaction amount transformations
             X_["TransactionAmt_log"] = np.log1p(X_["TransactionAmt"])
-            X_["TransactionAmt_decimal"] = (
-                X_["TransactionAmt"] - X_["TransactionAmt"].astype(int)
-            )
+            X_["TransactionAmt_decimal"] = X_["TransactionAmt"] - X_["TransactionAmt"].astype(int)
 
-        if 'card1' in X_.columns and 'TransactionAmt' in X_.columns:
+        if "card1" in X_.columns and "TransactionAmt" in X_.columns:
             # Card-level aggregations (fraud patterns)
-            X_["TransactionAmt_mean_card1"] = (
-                X_.groupby("card1")["TransactionAmt"].transform("mean")
+            X_["TransactionAmt_mean_card1"] = X_.groupby("card1")["TransactionAmt"].transform(
+                "mean"
             )
-            X_["TransactionAmt_std_card1"] = (
-                X_.groupby("card1")["TransactionAmt"].transform("std")
-            )
+            X_["TransactionAmt_std_card1"] = X_.groupby("card1")["TransactionAmt"].transform("std")
 
-        if 'TransactionDT' in X_.columns:
+        if "TransactionDT" in X_.columns:
             # Time-based features
             X_["TransactionDT_hour"] = (X_["TransactionDT"] % 86400) // 3600
             X_["TransactionDT_day"] = X_["TransactionDT"] // 86400
             X_["TransactionDT_weekday"] = (X_["TransactionDT"] // 86400) % 7
 
-        if 'P_emaildomain' in X_.columns and 'R_emaildomain' in X_.columns:
+        if "P_emaildomain" in X_.columns and "R_emaildomain" in X_.columns:
             # Email domain features
-            X_["email_domain_match"] = (
-                X_["P_emaildomain"] == X_["R_emaildomain"]
-            ).astype(int)
+            X_["email_domain_match"] = (X_["P_emaildomain"] == X_["R_emaildomain"]).astype(int)
             X_["email_domain_missing"] = (
                 X_["P_emaildomain"].isnull() | X_["R_emaildomain"].isnull()
             ).astype(int)
 
-        if 'dist1' in X_.columns and 'dist2' in X_.columns:
+        if "dist1" in X_.columns and "dist2" in X_.columns:
             # Distance ratio with safety for division by zero
             X_["dist_ratio"] = X_["dist1"] / (X_["dist2"] + 1e-5)
 
@@ -345,7 +337,7 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
         if len(d_cols) > 0:
             X_["D_missing_count"] = X_[d_cols].isnull().sum(axis=1)
 
-        if 'addr1' in X_.columns and 'addr2' in X_.columns:
+        if "addr1" in X_.columns and "addr2" in X_.columns:
             # Address matching
             X_["addr_match"] = (X_["addr1"] == X_["addr2"]).astype(int)
 
@@ -355,35 +347,31 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
             X_["M_true_count"] = (X_[m_cols] == "T").sum(axis=1)
 
         # === BID-WIN FEATURES (legacy support) ===
-        if 'lang' in X_.columns:
+        if "lang" in X_.columns:
             # Language code cleaning
             X_["lang"] = X_["lang"].apply(
                 lambda x: x.split("_")[0].split("-")[0] if isinstance(x, str) else x
             )
 
-        if 'price' in X_.columns and 'flr' in X_.columns:
+        if "price" in X_.columns and "flr" in X_.columns:
             X_["price_to_flr_ratio"] = X_["price"] / X_["flr"]
 
-        if 'price' in X_.columns and 'sellerClearPrice' in X_.columns:
-            X_["price_to_sellerClearPrice_ratio"] = (
-                X_["price"] / X_["sellerClearPrice"]
-            )
+        if "price" in X_.columns and "sellerClearPrice" in X_.columns:
+            X_["price_to_sellerClearPrice_ratio"] = X_["price"] / X_["sellerClearPrice"]
 
-        if 'hour' in X_.columns and 'price' in X_.columns:
+        if "hour" in X_.columns and "price" in X_.columns:
             X_["avg_price_by_hour"] = X_.groupby("hour")["price"].transform("mean")
 
-        if 'dsp' in X_.columns and 'price' in X_.columns:
+        if "dsp" in X_.columns and "price" in X_.columns:
             X_["price_std_by_dsp"] = X_.groupby("dsp")["price"].transform("std")
             X_["avg_price_by_dsp"] = X_.groupby("dsp")["price"].transform("mean")
 
-        if 'request_context_device_h' in X_.columns and 'request_context_device_w' in X_.columns:
+        if "request_context_device_h" in X_.columns and "request_context_device_w" in X_.columns:
             # Screen features (replace 0 with NaN)
             X_.loc[X_["request_context_device_h"] == 0, "request_context_device_h"] = np.nan
             X_.loc[X_["request_context_device_w"] == 0, "request_context_device_w"] = np.nan
 
-            X_["screen_ratio"] = (
-                X_["request_context_device_w"] / X_["request_context_device_h"]
-            )
+            X_["screen_ratio"] = X_["request_context_device_w"] / X_["request_context_device_h"]
             X_["screen_diagonal"] = np.sqrt(
                 X_["request_context_device_w"] ** 2 + X_["request_context_device_h"] ** 2
             )
@@ -427,9 +415,7 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
             )
 
         # Detect categorical features
-        categorical_features = X.select_dtypes(
-            include=["object", "category"]
-        ).columns.tolist()
+        categorical_features = X.select_dtypes(include=["object", "category"]).columns.tolist()
 
         # Build and fit base model
         self.model_ = self.build_model(self.variable_params, categorical_features)
@@ -438,15 +424,11 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
         # Store metadata
         self.features_ = X.columns.tolist()
         self.classes_ = self.model_.named_steps["classifier"].classes_
-        self.feature_importances_ = (
-            self.model_.named_steps["classifier"].feature_importances_
-        )
+        self.feature_importances_ = self.model_.named_steps["classifier"].feature_importances_
 
         # Apply calibration
         self.calibrated_model_ = MultiCalibrationWrapper(
-            base_estimator=self.model_,
-            method=self.calibration_method,
-            **self.calibration_params
+            base_estimator=self.model_, method=self.calibration_method, **self.calibration_params
         )
         self.calibrated_model_.fit(X, y)
 
@@ -598,13 +580,10 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
             X_ = self.model_.named_steps[step].transform(X_[self.features_])
 
         # Get SHAP contributions from LightGBM
-        contributions = self.model_.named_steps["classifier"].predict_proba(
-            X_, pred_contrib=True
-        )
+        contributions = self.model_.named_steps["classifier"].predict_proba(X_, pred_contrib=True)
 
         contributions_df = pd.DataFrame(
-            contributions,
-            columns=X.columns.tolist() + ["expected_value"]
+            contributions, columns=X.columns.tolist() + ["expected_value"]
         )
 
         return contributions_df

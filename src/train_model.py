@@ -4,8 +4,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import yaml
-from sklearn.metrics import (average_precision_score, brier_score_loss,
-                             roc_auc_score)
+from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from .custom_metrics import auc_pr, auc_pr_alt
@@ -90,9 +89,7 @@ def train_model(
         )
 
         features = [fe for fe in features if fe not in features_to_drop]
-        categorical_features = [
-            fe for fe in categorical_features if fe not in features_to_drop
-        ]
+        categorical_features = [fe for fe in categorical_features if fe not in features_to_drop]
 
     model_params_dict = {}
     model_params_dict["tunned_params"] = tunned_params

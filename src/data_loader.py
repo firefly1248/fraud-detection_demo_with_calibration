@@ -18,7 +18,7 @@ def load_fraud_data(
     train_identity_path: str = "ieee-fraud-detection/train_identity.csv",
     sample_frac: tp.Optional[float] = None,
     random_state: int = 0,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """
     Load and merge IEEE Fraud Detection transaction and identity data.
@@ -63,18 +63,22 @@ def load_fraud_data(
     identity_df = pd.read_csv(train_identity_path)
 
     if verbose:
-        print(f"   ✓ Loaded {len(identity_df):,} identity records with {identity_df.shape[1]} features")
+        print(
+            f"   ✓ Loaded {len(identity_df):,} identity records with {identity_df.shape[1]} features"
+        )
         print(f"   ✓ Identity coverage: {len(identity_df)/len(trans_df)*100:.1f}% of transactions")
 
     # Merge on TransactionID (left join to keep all transactions)
     if verbose:
         print(f"\n🔗 Merging transaction and identity data...")
 
-    df = trans_df.merge(identity_df, on='TransactionID', how='left')
+    df = trans_df.merge(identity_df, on="TransactionID", how="left")
 
     if verbose:
         print(f"   ✓ Merged shape: {df.shape}")
-        print(f"   ✓ Missing values: {df.isnull().sum().sum():,} ({df.isnull().sum().sum() / df.size * 100:.1f}%)")
+        print(
+            f"   ✓ Missing values: {df.isnull().sum().sum():,} ({df.isnull().sum().sum() / df.size * 100:.1f}%)"
+        )
 
     # Sample if requested
     if sample_frac is not None:
@@ -83,11 +87,9 @@ def load_fraud_data(
 
         # Stratified sampling to preserve fraud rate
         from sklearn.model_selection import train_test_split
+
         _, df = train_test_split(
-            df,
-            test_size=sample_frac,
-            random_state=random_state,
-            stratify=df['isFraud']
+            df, test_size=sample_frac, random_state=random_state, stratify=df["isFraud"]
         )
 
         if verbose:
@@ -107,7 +109,7 @@ def create_time_groups(
     time_column: str = "TransactionDT",
     n_bins: int = 50,
     method: str = "quantile",
-    verbose: bool = True
+    verbose: bool = True,
 ) -> pd.Series:
     """
     Create time-based groups for temporal validation using SimpleSplitter.
@@ -138,25 +140,19 @@ def create_time_groups(
     if verbose:
         print(f"\n⏰ Creating time groups from '{time_column}'...")
         print(f"   Time range: {df[time_column].min()} to {df[time_column].max()}")
-        print(f"   Duration: {df[time_column].max() - df[time_column].min():,} seconds " +
-              f"(~{(df[time_column].max() - df[time_column].min()) / 86400:.1f} days)")
+        print(
+            f"   Duration: {df[time_column].max() - df[time_column].min():,} seconds "
+            + f"(~{(df[time_column].max() - df[time_column].min()) / 86400:.1f} days)"
+        )
 
     if method == "quantile":
         # Equal-sized bins (same number of samples)
         time_groups = pd.qcut(
-            df[time_column],
-            q=n_bins,
-            labels=False,
-            duplicates='drop'  # Handle duplicate edges
+            df[time_column], q=n_bins, labels=False, duplicates="drop"  # Handle duplicate edges
         )
     elif method == "uniform":
         # Equal-width bins (same time duration)
-        time_groups = pd.cut(
-            df[time_column],
-            bins=n_bins,
-            labels=False,
-            duplicates='drop'
-        )
+        time_groups = pd.cut(df[time_column], bins=n_bins, labels=False, duplicates="drop")
     else:
         raise ValueError(f"Unknown method: {method}. Use 'quantile' or 'uniform'")
 
@@ -164,8 +160,10 @@ def create_time_groups(
         actual_bins = time_groups.nunique()
         print(f"   ✓ Created {actual_bins} time groups (requested: {n_bins})")
         print(f"   ✓ Method: {method}")
-        print(f"   ✓ Samples per group: min={time_groups.value_counts().min()}, " +
-              f"mean={time_groups.value_counts().mean():.0f}, max={time_groups.value_counts().max()}")
+        print(
+            f"   ✓ Samples per group: min={time_groups.value_counts().min()}, "
+            + f"mean={time_groups.value_counts().mean():.0f}, max={time_groups.value_counts().max()}"
+        )
 
     return time_groups
 
@@ -188,15 +186,15 @@ def get_categorical_features(df: pd.DataFrame) -> tp.List[str]:
     categorical_features = []
 
     # Explicit categorical features
-    explicit_cats = ['ProductCD', 'card4', 'card6', 'P_emaildomain', 'R_emaildomain']
+    explicit_cats = ["ProductCD", "card4", "card6", "P_emaildomain", "R_emaildomain"]
     categorical_features.extend([col for col in explicit_cats if col in df.columns])
 
     # M-features (boolean T/F)
-    m_features = [f'M{i}' for i in range(1, 10)]
+    m_features = [f"M{i}" for i in range(1, 10)]
     categorical_features.extend([col for col in m_features if col in df.columns])
 
     # Identity categorical features
-    identity_cats = ['DeviceType', 'DeviceInfo']
+    identity_cats = ["DeviceType", "DeviceInfo"]
     categorical_features.extend([col for col in identity_cats if col in df.columns])
 
     # Card features (high cardinality - consider as categorical for target encoding)
@@ -218,22 +216,22 @@ def get_fraud_dataset_info(df: pd.DataFrame) -> dict:
         Dictionary with dataset statistics
     """
     info = {
-        'n_samples': len(df),
-        'n_features': df.shape[1],
-        'fraud_rate': df['isFraud'].mean(),
-        'n_fraud': df['isFraud'].sum(),
-        'n_legitimate': (df['isFraud'] == 0).sum(),
-        'missing_rate': df.isnull().sum().sum() / df.size,
-        'time_range_seconds': df['TransactionDT'].max() - df['TransactionDT'].min(),
-        'time_range_days': (df['TransactionDT'].max() - df['TransactionDT'].min()) / 86400,
-        'n_categorical': len(get_categorical_features(df)),
+        "n_samples": len(df),
+        "n_features": df.shape[1],
+        "fraud_rate": df["isFraud"].mean(),
+        "n_fraud": df["isFraud"].sum(),
+        "n_legitimate": (df["isFraud"] == 0).sum(),
+        "missing_rate": df.isnull().sum().sum() / df.size,
+        "time_range_seconds": df["TransactionDT"].max() - df["TransactionDT"].min(),
+        "time_range_days": (df["TransactionDT"].max() - df["TransactionDT"].min()) / 86400,
+        "n_categorical": len(get_categorical_features(df)),
     }
 
     # Identity coverage
-    if 'DeviceType' in df.columns:
-        info['identity_coverage'] = df['DeviceType'].notna().mean()
+    if "DeviceType" in df.columns:
+        info["identity_coverage"] = df["DeviceType"].notna().mean()
     else:
-        info['identity_coverage'] = 0.0
+        info["identity_coverage"] = 0.0
 
     return info
 
@@ -260,7 +258,9 @@ def print_dataset_summary(df: pd.DataFrame) -> None:
     print(f"   Legitimate:  {info['n_legitimate']:,} ({1-info['fraud_rate']:.2%})")
 
     print(f"\n⏰ Time Range:")
-    print(f"   Duration:    {info['time_range_days']:.1f} days ({info['time_range_seconds']:,} seconds)")
+    print(
+        f"   Duration:    {info['time_range_days']:.1f} days ({info['time_range_seconds']:,} seconds)"
+    )
 
     print(f"\n💾 Data Quality:")
     print(f"   Missing:     {info['missing_rate']:.1%}")
@@ -279,7 +279,7 @@ if __name__ == "__main__":
 
     # Create time groups
     time_groups = create_time_groups(df, n_bins=50, verbose=True)
-    df['time_group'] = time_groups
+    df["time_group"] = time_groups
 
     # Print summary
     print_dataset_summary(df)

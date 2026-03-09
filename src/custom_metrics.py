@@ -1,6 +1,10 @@
-from sklearn.metrics import (auc, average_precision_score,
-                             precision_recall_curve, precision_score,
-                             recall_score)
+from sklearn.metrics import (
+    auc,
+    average_precision_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+)
 
 
 def auc_pr(y_true, y_scores):
@@ -25,6 +29,4 @@ def get_precision_recall_curves(y_true, y_scores):
         precisions.append(precision_score(y_true, pred_at_th, zero_division=0))
         recalls.append(recall_score(y_true, pred_at_th, zero_division=0))
 
-    return pd.DataFrame(
-        {"precision": precisions, "recall": recalls}, index=all_thresholds
-    )
+    return pd.DataFrame({"precision": precisions, "recall": recalls}, index=all_thresholds)

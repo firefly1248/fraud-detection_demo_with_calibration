@@ -32,9 +32,7 @@ def make_feature_selection(
 
         if isinstance(sorted_features_list, type(None)):
             features_round = [fe for fe in features if fe not in set(features_to_drop)]
-            categorical_features_round = [
-                fe for fe in categorical_features if fe in features_round
-            ]
+            categorical_features_round = [fe for fe in categorical_features if fe in features_round]
 
         else:
             for fe in sorted_features_list:
@@ -42,13 +40,9 @@ def make_feature_selection(
                     candidate_to_drop = fe
                     break
             features_round = [
-                fe
-                for fe in features
-                if fe not in features_to_drop + [candidate_to_drop]
+                fe for fe in features if fe not in features_to_drop + [candidate_to_drop]
             ]
-            categorical_features_round = [
-                fe for fe in categorical_features if fe in features_round
-            ]
+            categorical_features_round = [fe for fe in categorical_features if fe in features_round]
 
         feature_scores = np.zeros(len(features_round))
 
@@ -74,9 +68,7 @@ def make_feature_selection(
 
         if isinstance(sorted_features_list, type(None)):
             best_metric = metric_round
-            fe_imp_df = pd.DataFrame(
-                {"importance": (feature_scores / n_splits).tolist()}
-            )
+            fe_imp_df = pd.DataFrame({"importance": (feature_scores / n_splits).tolist()})
             fe_imp_df.index = features_round
             sorted_features_list = fe_imp_df.sort_values(
                 by=["importance"], ascending=True
@@ -104,9 +96,7 @@ def make_feature_selection(
                 print(f"drop: {candidate_to_drop}")
                 best_metric = metric_round
                 features_to_drop.append(candidate_to_drop)
-                fe_imp_df = pd.DataFrame(
-                    {"importance": (feature_scores / n_splits).tolist()}
-                )
+                fe_imp_df = pd.DataFrame({"importance": (feature_scores / n_splits).tolist()})
                 fe_imp_df.index = features_round
                 sorted_features_list = fe_imp_df.sort_values(
                     by=["importance"], ascending=True

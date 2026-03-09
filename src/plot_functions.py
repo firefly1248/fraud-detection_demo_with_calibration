@@ -50,9 +50,7 @@ def select_threshold_maximize_f1_cv(model, X, y, n_splits=5):
         plt.plot(thresholds, all_f1_scores[fold_index], label=f"Fold {fold_index + 1}")
 
     # Plotting the mean F1 score vs. threshold
-    plt.plot(
-        thresholds, mean_f1_scores, label="Mean F1 Score", color="black", linewidth=2
-    )
+    plt.plot(thresholds, mean_f1_scores, label="Mean F1 Score", color="black", linewidth=2)
     plt.axvline(
         x=best_threshold,
         color="r",
@@ -143,9 +141,7 @@ def plot_calibration_curve(y_true, y_pred_proba, n_bins=20):
 
 
 def plot_feature_importances(model):
-    imp_df = pd.DataFrame(
-        {"feature": model.features, "importance": model.feature_importances_}
-    )
+    imp_df = pd.DataFrame({"feature": model.features, "importance": model.feature_importances_})
 
     imp_df.sort_values("importance", inplace=True)
 
