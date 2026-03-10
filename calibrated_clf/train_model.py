@@ -8,6 +8,7 @@ import yaml
 from sklearn.metrics import average_precision_score
 
 from .config import RANDOM_SEED
+from .data_loader import create_time_groups
 from .feature_selection import make_feature_selection
 from .model import CalibratedBinaryClassifier
 from .model_optimisation import optimize_model
@@ -72,6 +73,10 @@ def train_model(
 
     if with_hp_opt:
         study_name = os.path.splitext(os.path.basename(model_config_path))[0] + "_optimisation"
+        # Use temporal CV if TransactionDT is available to prevent leakage
+        opt_groups = None
+        if "TransactionDT" in reduced_data.columns:
+            opt_groups = create_time_groups(reduced_data, n_bins=50, verbose=False)
         _, tunned_params = optimize_model(
             reduced_data,
             features,
@@ -81,6 +86,7 @@ def train_model(
             target_column_name=target_column,
             n_trials=n_trials,
             plot_report=True,
+            groups=opt_groups,
         )
     else:
         with open(model_config_path, "r") as f:

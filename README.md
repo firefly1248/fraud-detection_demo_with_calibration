@@ -1,6 +1,6 @@
 # Calibrated Binary Classifier
 
-> Production-ready binary classification framework with **Venn-ABERS conformal prediction**, temporal validation, and automated feature engineering.
+> Binary classification framework with **Venn-ABERS conformal prediction**, temporal validation, and automated feature engineering.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -16,17 +16,14 @@
   - 📈 Platt scaling (sigmoid)
   - 🔍 **Uncertainty quantification** via prediction intervals
 
-- **Production-Ready Architecture**
+- **Architecture**
   - ⚡ LightGBM with automated hyperparameter tuning (Optuna)
-  - 🔧 Automated feature engineering (26+ features)
+  - 🔧 Stateful feature engineering (no test leakage)
+  - 🔬 Recursive Feature Elimination (performance-based, feature-engine)
   - ⏱️ Temporal validation for time-series data
   - 🕒 **Time-windowed target encoding** (prevents leakage + concept drift)
   - 📦 Scikit-learn compatible API
 
-- **Multi-Domain Support**
-  - 💳 **Fraud Detection** (IEEE-CIS dataset, 590K transactions)
-  - 🎯 **Bid-Win Prediction** (RTB advertising)
-  - 🔄 Automatic dataset detection and feature engineering
 
 ---
 
@@ -36,7 +33,7 @@
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
+git clone https://github.com/firefly1248/fraud-detection_demo_with_calibration.git
 cd fraud-detection_demo_with_calibration
 
 # Create environment with uv (recommended)
@@ -53,8 +50,8 @@ poetry shell
 ### Basic Usage
 
 ```python
-from src.data_loader import load_fraud_data, create_time_groups
-from src.model import CalibratedBinaryClassifier
+from calibrated_clf.data_loader import load_fraud_data, create_time_groups
+from calibrated_clf.model import CalibratedBinaryClassifier
 
 # Load IEEE Fraud Detection data
 df = load_fraud_data(sample_frac=0.1)  # 10% sample for quick start
@@ -119,12 +116,12 @@ intervals = model_venn.predict_proba_with_intervals(X_test)
 
 ### 2. Temporal Validation 📅
 
-Built-in support for time-series cross-validation with **SimpleSplitter**:
+Built-in support for time-series cross-validation with **TemporalGroupSplitter**:
 
 ```python
-from src.validators import SimpleSplitter
+from calibrated_clf.validators import TemporalGroupSplitter
 
-splitter = SimpleSplitter(
+splitter = TemporalGroupSplitter(
     n_splits=5,
     val_unique_groups=5,      # ~10% of data for validation
     gap_unique_groups=2,      # 2-bin gap prevents data leakage
@@ -153,12 +150,6 @@ Detects dataset type and applies domain-specific features automatically:
 - Email/address matching
 - Missing value indicators
 
-**Bid-Win Prediction** (10 features):
-- Price ratios (price/floor, price/clearPrice)
-- Hourly price trends
-- DSP-specific aggregations
-- Screen dimensions
-
 **No manual feature engineering required!**
 
 ---
@@ -167,14 +158,18 @@ Detects dataset type and applies domain-specific features automatically:
 
 ### IEEE Fraud Detection (3.5% fraud rate)
 
-| Metric | Baseline | After Tuning | Target |
-|--------|----------|--------------|--------|
-| **AUC-ROC** | 0.90-0.95 | 0.93-0.97 | >0.95 |
-| **AUC-PR** | 0.45-0.65 | 0.55-0.75 | >0.60 |
-| **Brier Score** | 0.02-0.04 | 0.015-0.025 | <0.03 |
-| **ECE** | 0.01-0.02 | <0.01 | <0.01 |
+Calibration method comparison on held-out test set (temporal split, full 590K dataset):
 
-**Note**: Calibration is **critical** for imbalanced data (3.5% positive class)!
+| Method | AUC-PR | Brier Score | Log Loss | ECE |
+|--------|--------|-------------|----------|-----|
+| **Uncalibrated** | **0.5063** | **0.0229** | **0.0946** | **0.0024** |
+| **Isotonic** | 0.4935 | 0.0231 | 0.0955 | 0.0056 |
+| **Venn-ABERS** | 0.4957 | 0.0231 | 0.0950 | 0.0061 |
+| **Sigmoid** | 0.5063 | 0.0239 | 0.1051 | 0.0146 |
+
+> After temporal CV hyperparameter tuning, LightGBM is already well-calibrated (ECE=0.0024). Post-hoc calibration overfits to the calibration split and slightly hurts generalization on the out-of-time test set.
+
+> Reproduce: run `build_and_evaluate_model.ipynb` on the full IEEE-CIS dataset.
 
 ### Calibration Methods — Metric Heatmap
 
@@ -199,24 +194,24 @@ Detects dataset type and applies domain-specific features automatically:
 ## 🏗️ Architecture
 
 ```
-src/
+calibrated_clf/
 ├── model.py                    # CalibratedBinaryClassifier (core)
 ├── calibration.py              # Venn-ABERS + multi-calibration wrapper
 ├── data_loader.py              # IEEE Fraud data loading & time groups
-├── validators.py               # SimpleSplitter for temporal validation
+├── validators.py               # TemporalGroupSplitter for temporal validation
 ├── train_model.py              # Training pipeline with HP optimization
 ├── model_optimisation.py       # Optuna hyperparameter tuning
-├── feature_selection.py        # Recursive feature elimination
-├── data_transformers.py        # Encoders (TimeWindowed, CatBoost), imputers
-└── custom_metrics.py           # AUC-PR and evaluation metrics
+├── feature_selection.py        # Recursive feature elimination (custom)
+├── data_transformers.py        # FraudFeatureEngineer, TimeWindowedTargetEncoder
+└── config.py                   # Fixed model parameters & random seed
 ```
 
 **Key Design Principles:**
 1. ✅ **Scikit-learn compatible** - Follows sklearn API conventions
 2. ✅ **Fully documented** - NumPy/Google style docstrings everywhere
 3. ✅ **Type-safe** - Complete type hints with type aliases
-4. ✅ **Backward compatible** - `BidWinModel` alias maintained
-5. ✅ **Production-ready** - Error handling, validation, logging
+4. ✅ **Tested** - 45 unit tests, CI on Python 3.11 and 3.12
+5. ✅ **Robust** - Error handling, validation, logging
 
 ---
 
@@ -259,7 +254,7 @@ class CalibratedBinaryClassifier(BaseEstimator, ClassifierMixin):
 ### Hyperparameter Optimization
 
 ```python
-from src.train_model import train_model
+from calibrated_clf.train_model import train_model
 
 model = train_model(
     train_data=df,
@@ -280,22 +275,12 @@ print("Top contributing features:")
 print(top_features)
 ```
 
-### Custom Metrics
-
-```python
-from src.custom_metrics import auc_pr, auc_pr_alt
-
-# Use AUC-PR for imbalanced datasets (better than AUC-ROC)
-from sklearn.model_selection import cross_val_score
-scores = cross_val_score(model, X, y, cv=5, scoring='average_precision')
-```
-
 ### Time-Windowed Target Encoding
 
 For temporal data with concept drift, use `TimeWindowedTargetEncoder` to prevent both data leakage and outdated patterns:
 
 ```python
-from src.data_transformers import TimeWindowedTargetEncoder
+from calibrated_clf.data_transformers import TimeWindowedTargetEncoder
 from datetime import timedelta
 
 # Encode categorical features using only recent past data
@@ -350,19 +335,20 @@ ieee-fraud-detection/
 ### Run Feature Engineering Test
 ```bash
 python -c "
-from src.data_loader import load_fraud_data
-from src.model import CalibratedBinaryClassifier
+from calibrated_clf.data_loader import load_fraud_data
+from calibrated_clf.data_transformers import FraudFeatureEngineer
 
 df = load_fraud_data(sample_frac=0.01)
 X = df.drop(columns=['isFraud'])
-X_eng = CalibratedBinaryClassifier.prepare_and_extract_features(X)
+engineer = FraudFeatureEngineer()
+X_eng = engineer.fit_transform(X, df['isFraud'])
 print(f'Original: {X.shape[1]}, Engineered: {X_eng.shape[1]}')
 "
 ```
 
 ### Run Data Loader Test
 ```bash
-python src/data_loader.py
+python calibrated_clf/data_loader.py
 ```
 
 ---
@@ -400,9 +386,9 @@ If you use this framework in your research, please cite:
 ```bibtex
 @software{calibrated_binary_classifier,
   author = {Ekhlakov, Ilia},
-  title = {Calibrated Binary Classifier: Production-ready ML with Venn-ABERS},
+  title = {Calibrated Binary Classifier: ML with Venn-ABERS Conformal Prediction},
   year = {2026},
-  url = {https://github.com/yourusername/calibrated-binary-classifier}
+  url = {https://github.com/firefly1248/fraud-detection_demo_with_calibration}
 }
 ```
 
@@ -413,7 +399,7 @@ If you use this framework in your research, please cite:
 - ✨ **Cutting-edge**: Venn-ABERS conformal prediction (few implementations exist)
 - 📚 **Well-documented**: 650+ lines of professional docstrings
 - 🔒 **Type-safe**: Complete type hints throughout
-- 🧪 **Production-tested**: Handles real-world fraud detection (590K transactions)
+- 🧪 **Validated**: Handles real-world fraud detection (590K transactions)
 - 🎓 **Educational**: Clear examples and comprehensive guides
 
 ---
@@ -422,7 +408,7 @@ If you use this framework in your research, please cite:
 
 **Author**: Ilia Ekhlakov
 
-**Project Link**: https://github.com/yourusername/calibrated-binary-classifier
+**Project Link**: https://github.com/firefly1248/fraud-detection_demo_with_calibration
 
 ---
 

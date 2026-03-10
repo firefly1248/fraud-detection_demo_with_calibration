@@ -1,4 +1,5 @@
 import os
+import typing as tp
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,6 +10,7 @@ from sklearn.model_selection import StratifiedKFold
 
 from .config import RANDOM_SEED, VALIDATION_N_SPLITS
 from .model import CalibratedBinaryClassifier
+from .validators import TemporalGroupSplitter
 
 
 def optimize_model(
@@ -20,6 +22,8 @@ def optimize_model(
     target_column_name: str = "target",
     n_trials: int = 100,
     plot_report: bool = True,
+    groups: tp.Optional[pd.Series] = None,
+    gap_unique_groups: int = 2,
 ) -> tuple[CalibratedBinaryClassifier, dict]:
     """
     Optimizes a machine learning model using hyperparameter tuning with Optuna for a given dataset.
@@ -33,6 +37,10 @@ def optimize_model(
         target_column_name: The name of the target column in the dataset.
         n_trials: The number of trials for the Optuna hyperparameter optimization.
         plot_report: If True, generates and displays a report for the optimization process.
+        groups: Optional time group Series (same index as train_val_data). When provided,
+            uses TemporalGroupSplitter instead of StratifiedKFold to prevent temporal leakage.
+        gap_unique_groups: Number of time groups to skip between train and val windows
+            (only used when groups is provided).
 
     Returns:
         tuple[CalibratedBinaryClassifier, dict]:
@@ -87,12 +95,26 @@ def optimize_model(
 
         trial_metrics = []
 
-        splitter = StratifiedKFold(
-            n_splits=VALIDATION_N_SPLITS, random_state=RANDOM_SEED, shuffle=True
-        )
-        for train_index, test_index in splitter.split(
-            train_val_data, train_val_data[target_column_name]
-        ):
+        if groups is not None:
+            n_unique = groups.loc[train_val_data.index].nunique()
+            val_q = max(1, n_unique // (VALIDATION_N_SPLITS + 1) - gap_unique_groups)
+            splitter = TemporalGroupSplitter(
+                n_splits=VALIDATION_N_SPLITS,
+                val_unique_groups=val_q,
+                gap_unique_groups=gap_unique_groups,
+                train_accounts_share=0,
+            )
+            split_groups = groups.loc[train_val_data.index]
+            splits = splitter.split(
+                train_val_data, train_val_data[target_column_name], split_groups
+            )
+        else:
+            splitter = StratifiedKFold(
+                n_splits=VALIDATION_N_SPLITS, random_state=RANDOM_SEED, shuffle=True
+            )
+            splits = splitter.split(train_val_data, train_val_data[target_column_name])
+
+        for train_index, test_index in splits:
             train_set = train_val_data.iloc[train_index].reset_index(drop=True)
 
             val_set = train_val_data.iloc[test_index].reset_index(drop=True)
