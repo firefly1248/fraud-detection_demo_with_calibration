@@ -11,16 +11,18 @@ MODEL_FIXED_PARAMS = {
     "force_col_wise": True,
 }
 
-# Best params from Optuna (fraud_detection_optimization.db, trial #100, AUC-PR = 0.7781)
+# Best params from Optuna (fraud_detection_optimization.db, temporal CV, AUC-PR = 0.5063)
 MODEL_DEFAULT_VARIABLE_PARAMS = {
     "cat_encoder__strategy": "target_encoder",
-    "classifier__boosting_type": "gbdt",
-    "classifier__learning_rate": 0.765,
+    "classifier__boosting_type": "goss",
+    "classifier__learning_rate": 0.07361804205513668,
     "classifier__max_depth": 8,
-    "classifier__n_estimators": 163,
-    "classifier__num_leaves": 100,
-    "classifier__colsample_bytree": 0.634,
-    "classifier__reg_alpha": 0.00154,
-    "classifier__reg_lambda": 36.42,
-    "classifier__min_split_gain": 6.4e-8,
+    "classifier__n_estimators": 166,
+    "classifier__num_leaves": 111,
+    "classifier__colsample_bytree": 0.6417147630495295,
+    "classifier__reg_alpha": 5.143443569535221e-07,
+    "classifier__reg_lambda": 3.838736308535599e-05,
+    "classifier__min_split_gain": 1.0471657118126228e-08,
+    "classifier__top_rate": 0.18410976659325012,
+    "classifier__other_rate": 0.3808023999284922,
 }
