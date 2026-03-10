@@ -5,8 +5,9 @@ import joblib
 import pandas as pd
 import yaml
 
+from sklearn.metrics import average_precision_score
+
 from .config import RANDOM_SEED
-from .custom_metrics import auc_pr_alt
 from .feature_selection import make_feature_selection
 from .model import CalibratedBinaryClassifier
 from .model_optimisation import optimize_model
@@ -76,7 +77,7 @@ def train_model(
             features,
             categorical_features,
             study_name=study_name,
-            metric_name="auc_pr_alt",
+            metric_name="average_precision",
             target_column_name=target_column,
             n_trials=n_trials,
             plot_report=True,
@@ -98,7 +99,7 @@ def train_model(
             reduced_data[features],
             reduced_data[target_column],
             categorical_features,
-            metric=auc_pr_alt,
+            metric=average_precision_score,
             greater_is_better=True,
         )
         features = [f for f in features if f not in features_to_drop]

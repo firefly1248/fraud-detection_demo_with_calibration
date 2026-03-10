@@ -4,11 +4,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optuna
 import pandas as pd
-from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import average_precision_score, brier_score_loss, log_loss, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 
 from .config import RANDOM_SEED, VALIDATION_N_SPLITS
-from .custom_metrics import auc_pr, auc_pr_alt
 from .model import CalibratedBinaryClassifier
 
 
@@ -113,16 +112,14 @@ def optimize_model(
 
             if metric_name == "brier":
                 trial_metrics.append(brier_score_loss(y_val, y_pred_val))
-            elif metric_name == "auc_pr":
-                trial_metrics.append(auc_pr(y_val, y_pred_val))
-            elif metric_name == "auc_pr_alt":
-                trial_metrics.append(auc_pr_alt(y_val, y_pred_val))
+            elif metric_name == "average_precision":
+                trial_metrics.append(average_precision_score(y_val, y_pred_val))
             elif metric_name == "logloss":
                 trial_metrics.append(log_loss(y_val, y_pred_val))
             elif metric_name == "roc_auc":
                 trial_metrics.append(roc_auc_score(y_val, y_pred_val))
             else:
-                raise Exception("Unknown metric")
+                raise ValueError(f"Unknown metric: {metric_name!r}")
 
         resulting_trial_metric = np.average(trial_metrics)  # - np.std(trial_metrics)
         return resulting_trial_metric
