@@ -223,7 +223,6 @@ src/
 ## 📖 Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Complete project guide for future development
-- **[FRAUD_DETECTION_MIGRATION_SPEC.md](FRAUD_DETECTION_MIGRATION_SPEC.md)** - Detailed migration specification
 - **Docstrings** - Every class and function fully documented with examples
 
 ### Example Documentation
