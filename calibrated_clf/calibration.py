@@ -87,6 +87,18 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
             time_column: If provided, sort by this column and use the latest
                 cal_size fraction for calibration (temporal split).
                 If None, use a random stratified split.
+
+        Two-stage API
+        -------------
+        fit(X, y)
+            Splits X into a proper training portion and a calibration portion,
+            refits base_estimator on the former, then fits the calibrator on the latter.
+            Use this when you pass all training data to the wrapper.
+
+        calibrate(X_cal, y_cal)
+            Fits only the calibrator on a pre-split calibration set.
+            base_estimator must already be fitted. Use this when the train/cal
+            split has been done externally (e.g. in compare_calibration_methods).
         """
         self.base_estimator = base_estimator
         self.method = method
@@ -107,11 +119,13 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
         """
         if self.time_column is not None and self.time_column in X.columns:
             X_sorted = X.sort_values(self.time_column)
+            y_sorted = y.loc[X_sorted.index]
             n_cal = max(1, int(len(X_sorted) * self.cal_size))
             X_proper = X_sorted.iloc[:-n_cal]
             X_cal = X_sorted.iloc[-n_cal:]
-            y_proper = y.loc[X_proper.index]
-            y_cal = y.loc[X_cal.index]
+            # Use iloc on the sorted y to avoid duplicated-index ambiguity
+            y_proper = y_sorted.iloc[:-n_cal]
+            y_cal = y_sorted.iloc[-n_cal:]
         else:
             from sklearn.model_selection import train_test_split
 
@@ -121,58 +135,120 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
         return X_proper, X_cal, y_proper, y_cal
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
-        """Fit calibration on top of base estimator."""
+        """Split X internally, refit base_estimator, then fit the calibrator.
+
+        Use this when passing all training data to the wrapper.
+        For the case where the train/cal split was done externally, use calibrate().
+
+        For venn_abers_mode='cross', trains cv_folds sub-models to obtain out-of-fold
+        calibration scores (CVAP), then trains a final model on all data. This avoids
+        wasting cal_size fraction of training data on calibration.
+        """
         self.classes_ = np.unique(y)
 
         if self.method is None or self.method == "none":
-            # No calibration
+            self.calibrator_ = None
+            return self
+
+        from sklearn.base import clone
+
+        if self.method == "venn_abers" and self.venn_abers_mode == "cross":
+            return self._fit_cross_venn_abers(X, y)
+
+        X_proper, X_cal, y_proper, y_cal = self._split_for_calibration(X, y)
+        self.base_estimator = clone(self.base_estimator)
+        self.base_estimator.fit(X_proper, y_proper)
+        return self.calibrate(X_cal, y_cal)
+
+    def _fit_cross_venn_abers(self, X: pd.DataFrame, y: pd.Series):
+        """Fit Cross Venn-ABERS (CVAP) using k-fold out-of-fold predictions.
+
+        Unlike inductive Venn-ABERS (IVAP), CVAP uses all training data for both
+        calibration and the final model:
+
+        1. Split X into cv_folds stratified folds
+        2. For each fold i: train a clone on k-1 folds, predict on fold i
+        3. Collect all out-of-fold (score, label) pairs as the calibration set
+        4. Train the final base_estimator on all of X
+        5. Fit RigorousVennABERSCalibrator on the combined OOF scores
+
+        Compared to IVAP, CVAP provides a larger and more representative
+        calibration set (100% of training data vs cal_size fraction), at the
+        cost of cv_folds + 1 model fits instead of 2.
+        """
+        from sklearn.model_selection import StratifiedKFold
+        from sklearn.base import clone
+
+        kf = StratifiedKFold(
+            n_splits=self.cv_folds, shuffle=True, random_state=self.random_state
+        )
+
+        X_arr = X.values if isinstance(X, pd.DataFrame) else X
+        y_arr = y.values if isinstance(y, pd.Series) else y
+
+        # Pre-allocate OOF scores — each sample gets its score exactly once
+        p_oof = np.zeros(len(y_arr))
+
+        for train_idx, val_idx in kf.split(X_arr, y_arr):
+            X_fold_train = X.iloc[train_idx] if isinstance(X, pd.DataFrame) else X_arr[train_idx]
+            X_fold_val = X.iloc[val_idx] if isinstance(X, pd.DataFrame) else X_arr[val_idx]
+            y_fold_train = y_arr[train_idx]
+
+            fold_model = clone(self.base_estimator)
+            fold_model.fit(X_fold_train, y_fold_train)
+            p_oof[val_idx] = fold_model.predict_proba(X_fold_val)[:, 1]
+
+        # Train final model on all data for use at prediction time
+        self.base_estimator = clone(self.base_estimator)
+        self.base_estimator.fit(X, y)
+
+        # Fit calibrator on the full OOF calibration set
+        self.calibrator_ = RigorousVennABERSCalibrator(precision=3, use_cache=True)
+        self.calibrator_.fit(p_oof, y_arr)
+
+        return self
+
+    def calibrate(self, X_cal: pd.DataFrame, y_cal: pd.Series):
+        """Fit only the calibrator on a pre-split calibration set.
+
+        base_estimator must already be fitted before calling this method.
+        Use this when the train/cal split has been done externally.
+        """
+        from sklearn.utils.validation import check_is_fitted
+
+        check_is_fitted(self.base_estimator)
+
+        if self.classes_ is None:
+            # Prefer classes from the already-fitted base estimator to avoid
+            # missing classes when y_cal is a small or imbalanced subset.
+            if hasattr(self.base_estimator, "classes_"):
+                self.classes_ = self.base_estimator.classes_
+            else:
+                self.classes_ = np.unique(y_cal)
+
+        if self.method is None or self.method == "none":
             self.calibrator_ = None
             return self
 
         elif self.method in ("isotonic", "sigmoid"):
-            from sklearn.base import clone
-
-            X_proper, X_cal, y_proper, y_cal = self._split_for_calibration(X, y)
-
-            # Refit the base model on the proper training portion only
-            self.base_estimator = clone(self.base_estimator)
-            self.base_estimator.fit(X_proper, y_proper)
-
-            # Fit the calibration layer on the held-out (more recent) portion
             self.calibrator_ = CalibratedClassifierCV(
                 estimator=self.base_estimator, method=self.method, cv="prefit"
             )
             self.calibrator_.fit(X_cal, y_cal)
 
         elif self.method == "venn_abers":
-            # Venn-ABERS conformal prediction using rigorous implementation
-            # This avoids the issue of VennAbersCalibrator refitting the pipeline
-            # with numpy arrays when it expects DataFrames
-
-            # For inductive Venn-ABERS, split into proper training and calibration sets
             if self.venn_abers_mode == "inductive":
-                from sklearn.base import clone
-
-                X_proper, X_cal, y_proper, y_cal = self._split_for_calibration(X, y)
-
-                # Refit base model on proper training set only
-                self.base_estimator = clone(self.base_estimator)
-                self.base_estimator.fit(X_proper, y_proper)
-
-                # Get predictions on calibration set
                 p_cal = self.base_estimator.predict_proba(X_cal)[:, 1]
-
-                # Fit RIGOROUS Venn-ABERS calibrator with conformal guarantees
-                # Note: This is slower but mathematically correct
                 self.calibrator_ = RigorousVennABERSCalibrator(
-                    precision=3,  # Round to 3 decimals for speed
-                    use_cache=True,  # Cache results for repeated values
+                    precision=3,
+                    use_cache=True,
                 )
                 self.calibrator_.fit(p_cal, y_cal.values if hasattr(y_cal, "values") else y_cal)
             else:
                 raise NotImplementedError(
-                    "venn_abers_mode='cross' (k-fold cross-conformal) is not yet implemented. "
-                    "Use venn_abers_mode='inductive' instead."
+                    "venn_abers_mode='cross' requires refitting the base model k times "
+                    "and is only available via fit(). For an external calibration split, "
+                    "use venn_abers_mode='inductive' with calibrate()."
                 )
 
         else:
@@ -332,7 +408,10 @@ class VennABERSBinaryCalibrator(BaseEstimator):
         p1 = self.iso_regressor_1_.predict(p_test)
 
         # Combined probability (recommended for decision making)
-        p_combined = p1 / (1 - p0 + p1 + 1e-10)  # Add epsilon for numerical stability
+        # Use np.divide with where= to return 0 when denominator is zero
+        # (occurs when p0=1, p1=0 — unambiguously class 0)
+        denom = 1 - p0 + p1
+        p_combined = np.divide(p1, denom, out=np.zeros_like(p1), where=denom > 0)
 
         # Interval width (uncertainty measure)
         interval_width = p1 - p0
@@ -352,8 +431,10 @@ class RigorousVennABERSCalibrator(BaseEstimator):
     possible labels (0 and 1), fits isotonic regression, and returns the
     prediction intervals [p0, p1] with validity guarantees.
 
-    ⚠️ Note: This is O(n_test × n_cal) complexity, so slower than the simplified
-    version, but provides mathematically rigorous conformal prediction intervals.
+    ⚠️ Note: Each isotonic fit is O(n_cal log n_cal), so total complexity is
+    O(n_test × n_cal log n_cal). In practice this is bounded by
+    O(min(n_test, 10^precision) × n_cal log n_cal) when use_cache=True,
+    since identical rounded scores are computed only once.
 
     Parameters
     ----------
@@ -422,41 +503,46 @@ class RigorousVennABERSCalibrator(BaseEstimator):
         p0 = np.zeros(n_test)
         p1 = np.zeros(n_test)
 
-        # For each test point, fit isotonic regression with that point added
-        for i, p_t in enumerate(p_test):
-            # Check cache first if enabled
-            cache_key = float(p_t) if self.use_cache else None
+        # Compute only for unique values, then map back — avoids redundant fits
+        # when many test points share the same (rounded) score.
+        unique_vals, inverse = np.unique(p_test, return_inverse=True)
+        p0_unique = np.zeros(len(unique_vals))
+        p1_unique = np.zeros(len(unique_vals))
 
-            # p0: Add (p_t, 0) to calibration set
+        for j, p_t in enumerate(unique_vals):
+            cache_key = float(p_t)
+
             if self.use_cache and cache_key in self._cache_0:
-                p0[i] = self._cache_0[cache_key]
+                p0_unique[j] = self._cache_0[cache_key]
             else:
                 p_cal_0 = np.concatenate([self.p_cal_, [p_t]])
                 y_cal_0 = np.concatenate([self.y_cal_, [0]])
                 iso_0 = IsotonicRegression(out_of_bounds="clip")
                 iso_0.fit(p_cal_0, y_cal_0)
-                p0[i] = iso_0.predict([p_t])[0]
-
+                p0_unique[j] = iso_0.predict([p_t])[0]
                 if self.use_cache:
-                    self._cache_0[cache_key] = p0[i]
+                    self._cache_0[cache_key] = p0_unique[j]
 
-            # p1: Add (p_t, 1) to calibration set
             if self.use_cache and cache_key in self._cache_1:
-                p1[i] = self._cache_1[cache_key]
+                p1_unique[j] = self._cache_1[cache_key]
             else:
                 p_cal_1 = np.concatenate([self.p_cal_, [p_t]])
                 y_cal_1 = np.concatenate([self.y_cal_, [1]])
                 iso_1 = IsotonicRegression(out_of_bounds="clip")
                 iso_1.fit(p_cal_1, y_cal_1)
-                p1[i] = iso_1.predict([p_t])[0]
-
+                p1_unique[j] = iso_1.predict([p_t])[0]
                 if self.use_cache:
-                    self._cache_1[cache_key] = p1[i]
+                    self._cache_1[cache_key] = p1_unique[j]
+
+        p0 = p0_unique[inverse]
+        p1 = p1_unique[inverse]
 
         # Combined probability (recommended for decision making)
-        # This is the Venn-ABERS combination formula
-        epsilon = 1e-10
-        p_combined = p1 / (1 - p0 + p1 + epsilon)
+        # This is the Venn-ABERS combination formula.
+        # Use np.divide with where= to return 0 when denominator is zero
+        # (occurs when p0=1, p1=0 — unambiguously class 0)
+        denom = 1 - p0 + p1
+        p_combined = np.divide(p1, denom, out=np.zeros_like(p1), where=denom > 0)
 
         # Clip to valid probability range
         p_combined = np.clip(p_combined, 0, 1)
@@ -495,11 +581,12 @@ def compare_calibration_methods(
     results = []
 
     for method in methods:
-        # Fit calibrator
+        # The train/cal split was done externally by the caller — use calibrate()
+        # so the base model is not re-split or refitted.
         calibrator = MultiCalibrationWrapper(
-            base_estimator=model, method=method, cal_size=0.2, random_state=RANDOM_SEED
+            base_estimator=model, method=method, random_state=RANDOM_SEED
         )
-        calibrator.fit(X_cal, y_cal)
+        calibrator.calibrate(X_cal, y_cal)
 
         # Predict on test set
         y_pred_proba = calibrator.predict_proba(X_test)[:, 1]
