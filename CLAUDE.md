@@ -2,485 +2,104 @@
 
 ## Project Overview
 
-This is a production-ready **binary classification framework** supporting:
-- **Fraud Detection** (IEEE-CIS Fraud Detection dataset)
-- **Bid-Win Prediction** (RTB advertising auctions)
-- **Advanced Calibration**: Isotonic, Venn-ABERS (conformal prediction), Sigmoid
-- **Temporal Validation**: SimpleSplitter for time-series cross-validation
-- **Feature Engineering**: Automated detection and engineering for both datasets
+Binary classification framework for fraud detection (IEEE-CIS, 590K transactions).
 
-**Core Model**: `CalibratedBinaryClassifier` (formerly `BidWinModel` - alias maintained for backward compatibility)
+**Core Model**: `CalibratedBinaryClassifier`
+**Calibration**: Isotonic, Venn-ABERS IVAP/CVAP (conformal prediction), Sigmoid
+**Temporal Validation**: `TemporalGroupSplitter` with time-based splits
 
 ---
 
 ## Project Structure
 
 ```
-.
-├── calibrated_clf/
-│   ├── model.py                    # Core: CalibratedBinaryClassifier
-│   ├── calibration.py              # Venn-ABERS + isotonic + sigmoid
-│   ├── data_loader.py              # IEEE Fraud data loading & time groups
-│   ├── validators.py               # SimpleSplitter for temporal validation
-│   ├── train_model.py              # Training pipeline with HP optimization
-│   ├── model_optimisation.py       # Optuna hyperparameter tuning
-│   ├── feature_selection.py        # Recursive feature elimination
-│   ├── data_transformers.py        # Categorical encoders, imputers
-│   ├── custom_metrics.py           # AUC-PR and custom metrics
-│   ├── plot_functions.py           # Visualization utilities
-│   └── config.py                   # Fixed model parameters
-├── ieee-fraud-detection/
-│   ├── train_transaction.csv       # 590K transactions, 394 features
-│   ├── train_identity.csv          # 144K identity records, 41 features
-│   ├── test_transaction.csv
-│   └── test_identity.csv
-├── build_and_evaluate_model.ipynb  # Bid-win evaluation + calibration comparison
-├── pyproject.toml                  # Poetry/uv dependencies
-├── poetry.lock
-├── FRAUD_DETECTION_MIGRATION_SPEC.md  # Complete migration specification
-└── CLAUDE.md                       # This file
+calibrated_clf/
+├── model.py               # CalibratedBinaryClassifier — core model + feature engineering
+├── calibration.py         # MultiCalibrationWrapper, Venn-ABERS IVAP/CVAP, isotonic, sigmoid
+├── data_loader.py         # load_fraud_data(), create_time_groups()
+├── validators.py          # TemporalGroupSplitter (DO NOT MODIFY)
+├── train_model.py         # Training pipeline, auto-detects TransactionDT for temporal CV
+├── model_optimisation.py  # Optuna HP tuning — uses TemporalGroupSplitter when groups provided
+├── feature_selection.py   # Recursive feature elimination
+├── data_transformers.py   # FraudFeatureEngineer, TimeWindowedTargetEncoder
+├── plot_functions.py      # Visualization utilities
+└── config.py              # Fixed LightGBM params + best Optuna hyperparams (DO NOT MODIFY)
 
+ieee-fraud-detection/      # Kaggle dataset — train/test_transaction.csv, train/test_identity.csv
+build_and_evaluate_model.ipynb  # Fraud detection evaluation + calibration comparison
 ```
 
 ---
 
-## Quick Start
+## Code Style
 
-### Environment Setup
-
-```bash
-# Using uv (recommended)
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
-uv pip install -e .
-
-# Or using poetry
-poetry install
-poetry shell
-```
-
-### Train on Fraud Detection
-
-```python
-from calibrated_clf.data_loader import load_fraud_data, create_time_groups
-from calibrated_clf.model import CalibratedBinaryClassifier
-
-# Load data
-df = load_fraud_data(sample_frac=0.1)  # 10% sample for development
-df['time_group'] = create_time_groups(df, n_bins=50)
-
-# Separate features and target
-X = df.drop(columns=['isFraud', 'TransactionID', 'time_group'])
-y = df['isFraud']
-
-# Apply feature engineering (automatic in fit, but can be done manually)
-X_eng = CalibratedBinaryClassifier.prepare_and_extract_features(X)
-
-# Train with Venn-ABERS calibration
-model = CalibratedBinaryClassifier(
-    variable_params={
-        'classifier__learning_rate': 0.05,
-        'classifier__max_depth': 6,
-        'classifier__n_estimators': 100,
-        'cat_encoder__strategy': 'target_encoder'
-    },
-    calibration_method='venn_abers',
-    calibration_params={'cal_size': 0.2}
-)
-model.fit(X_eng, y)
-
-# Predict with uncertainty intervals
-intervals = model.predict_proba_with_intervals(X_test)
-print(f"Mean uncertainty: {intervals['interval_width'].mean():.4f}")
-```
-
-### Temporal Validation
-
-```python
-from calibrated_clf.validators import SimpleSplitter
-
-splitter = SimpleSplitter(
-    n_splits=5,
-    val_unique_groups=5,      # ~10% of 50 bins
-    gap_unique_groups=2,      # 2-bin gap prevents leakage
-    train_accounts_share=0
-)
-
-for train_idx, val_idx in splitter.split(X, y, groups=df['time_group']):
-    X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
-    X_val, y_val = X.iloc[val_idx], y.iloc[val_idx]
-    # Train and evaluate
-```
-
----
-
-## Code Style & Best Practices
-
-### 1. **Type Hints**
-Always use type hints for function signatures:
-```python
-def load_data(path: str, sample_frac: Optional[float] = None) -> pd.DataFrame:
-    ...
-```
-
-### 2. **Docstrings**
-Use NumPy/Google style with Parameters, Returns, Examples, Notes:
-```python
-def train_model(data: pd.DataFrame, target: str = "isFraud") -> CalibratedBinaryClassifier:
-    """
-    Train binary classification model with calibration.
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-        Training data with features and target
-    target : str, default='isFraud'
-        Name of target column
-
-    Returns
-    -------
-    CalibratedBinaryClassifier
-        Fitted model with calibration
-
-    Examples
-    --------
-    >>> model = train_model(df, target='isFraud')
-    >>> predictions = model.predict_proba(X_test)
-    """
-```
-
-### 3. **Sklearn Conventions**
-- Fitted attributes use trailing underscore: `model_`, `features_`, `is_fitted_`
-- Inherit from `BaseEstimator` and `ClassifierMixin`
-- Implement `fit()`, `predict()`, `predict_proba()`
-- Return `self` from `fit()` for chaining
-
-### 4. **Error Handling**
-Provide informative error messages:
-```python
-if len(unique_classes) != 2:
-    raise ValueError(
-        f"Target must be binary. Found {len(unique_classes)} classes: {unique_classes}"
-    )
-```
-
-### 5. **Backward Compatibility**
-When renaming classes, keep aliases:
-```python
-BidWinModel = CalibratedBinaryClassifier  # Backward compatibility
-```
+- **Type hints** on all function signatures
+- **NumPy/Google docstrings** with Parameters, Returns, Examples sections
+- **Sklearn conventions**: fitted attributes end in `_` (`model_`, `features_`, `is_fitted_`), inherit `BaseEstimator`/`ClassifierMixin`, return `self` from `fit()`
+- **black** formatting enforced in CI — run `black calibrated_clf/` before committing
 
 ---
 
 ## Key Design Decisions
 
-### Feature Engineering is Automatic
-- `prepare_and_extract_features()` detects dataset type (fraud vs bid-win)
-- Applied automatically in `fit()` and `predict()`
-- Can be called manually if needed
+### Feature Engineering
+- `prepare_and_extract_features()` auto-detects dataset from column names
+- Applied automatically in `fit()` and `predict()` — no manual step needed
+- To add features: edit `CalibratedBinaryClassifier.prepare_and_extract_features()` in `model.py`
 
-### Calibration Methods
-1. **Isotonic** (default): Fast, works well for large datasets
-2. **Venn-ABERS**: Provides prediction intervals with mathematical guarantees
-3. **Sigmoid**: Platt scaling (logistic regression)
-4. **None**: No calibration
+### Pipeline Step Naming (`model.py`)
+`CalibratedBinaryClassifier` wraps a sklearn `Pipeline` with two named steps: `cat_encoder` and `classifier`. All `variable_params` keys follow the `step_name__param` convention — e.g. `classifier__learning_rate`, `cat_encoder__strategy`. Breaking these names breaks `config.py`, Optuna, and all saved hyperparameter configs.
 
-**When to use Venn-ABERS:**
-- High-stakes decisions (fraud, medical, loans)
-- Need uncertainty quantification
-- Want to flag ambiguous predictions
+### Calibration: `MultiCalibrationWrapper`
+
+**Methods:**
+1. `isotonic` — fast, good default
+2. `venn_abers` + `venn_abers_mode='inductive'` (IVAP) — 2 fits, reserves `cal_size` fraction; conformal intervals [p0, p1]
+3. `venn_abers` + `venn_abers_mode='cross'` (CVAP) — `cv_folds+1` fits, uses 100% training data via OOF; better for small datasets
+4. `sigmoid` — Platt scaling
+5. `None` — no calibration
+
+**Two-stage API:**
+- `fit(X, y)` — splits internally, refits base model, fits calibrator
+- `calibrate(X_cal, y_cal)` — calibrator only; base model must be pre-fitted (guarded by `check_is_fitted`); use when split is done externally (e.g. `compare_calibration_methods`)
+- CVAP is only available via `fit()`, not `calibrate()`
+- `calibrate()` prefers `base_estimator.classes_` over `np.unique(y_cal)` to handle imbalanced subsets
+
+**⚠️ Important**: After temporal CV tuning on IEEE Fraud, LightGBM (binary cross-entropy) is already well-calibrated (ECE≈0.002). Post-hoc calibration on a temporally mismatched cal set tends to hurt AUC-PR. Always evaluate calibration on true out-of-time test set.
 
 ### Temporal Validation
-- Use `SimpleSplitter` with `time_group` column
-- Set `gap_unique_groups > 0` to prevent data leakage
-- Mimics production scenario (train on past, predict future)
+- `TemporalGroupSplitter` requires `groups` (time bins from `create_time_groups(df, n_bins=50)`)
+- Always set `gap_unique_groups > 0` to prevent leakage between train and val windows
+- Optuna (`model_optimisation.py`) uses `TemporalGroupSplitter` automatically when `groups` is passed; falls back to `StratifiedKFold` otherwise
+- **Old Optuna DB**: `load_if_exists=True` with stale DB imports old (StratifiedKFold) trials — delete DB before switching CV strategy
 
-### Time-Windowed Target Encoding
-The `TimeWindowedTargetEncoder` in `data_transformers.py` prevents both **data leakage** and **concept drift**:
-- Like CatBoost encoder, only uses past data (prevents leakage)
-- Unlike CatBoost, limits history to recent time window (prevents drift)
-- For each row at timestamp T, uses only data from [T - window, T)
-
-**When to use:**
-- Temporal data with concept drift (fraud patterns change over time)
-- Want to focus on recent behavior patterns
-- Balance between preventing leakage and using relevant historical data
-
-```python
-from calibrated_clf.data_transformers import TimeWindowedTargetEncoder
-
-encoder = TimeWindowedTargetEncoder(
-    time_column='TransactionDT',
-    time_window=30,  # 30 days lookback
-    cols=['card1', 'card2', 'ProductCD'],
-    smoothing=10.0,
-    min_samples_leaf=20
-)
-X_encoded = encoder.fit_transform(X_train, y_train)
-```
-
----
-
-## Common Tasks
-
-### Add New Features
-Edit `CalibratedBinaryClassifier.prepare_and_extract_features()` in `calibrated_clf/model.py`:
-```python
-if 'new_column' in X_.columns:
-    X_["new_feature"] = X_["new_column"].apply(transformation)
-```
-
-### Change Calibration Method
-```python
-# Isotonic (fast)
-model = CalibratedBinaryClassifier(params, calibration_method='isotonic')
-
-# Venn-ABERS (with uncertainty)
-model = CalibratedBinaryClassifier(
-    params,
-    calibration_method='venn_abers',
-    calibration_params={'cal_size': 0.2}
-)
-```
-
-### Run Hyperparameter Optimization
-```python
-from calibrated_clf.train_model import train_model
-
-train_model(
-    train_data=df,
-    target_column='isFraud',
-    with_hp_opt=True,
-    n_trials=100,
-    model_config_path='fraud_model_params.yaml',
-    model_save_path='fraud_model.joblib'
-)
-```
-
-### Load Saved Model
-```python
-import joblib
-model = joblib.load('fraud_model.joblib')
-predictions = model.predict_proba(X_test)
-```
-
-### Use Time-Windowed Target Encoding
-For temporal data with concept drift, use `TimeWindowedTargetEncoder`:
-```python
-from calibrated_clf.data_transformers import TimeWindowedTargetEncoder
-from sklearn.pipeline import Pipeline
-
-# Create encoder (replaces standard CatBoost encoder)
-time_encoder = TimeWindowedTargetEncoder(
-    time_column='TransactionDT',
-    time_window=timedelta(days=30),  # or int (30) for days, or float for seconds
-    cols=['card1', 'card2', 'ProductCD', 'card4', 'card6'],
-    smoothing=10.0,      # Higher = more smoothing for rare categories
-    min_samples_leaf=20,  # Min samples in window to compute encoding
-    verbose=True
-)
-
-# Apply to data (time_column must be in X)
-X_encoded = time_encoder.fit_transform(X_train, y_train)
-
-# Or use in pipeline (note: requires time_column in X throughout)
-pipeline = Pipeline([
-    ('time_encoder', time_encoder),
-    ('imputer', MissingDataHandler(strategy='mean')),
-    ('classifier', lgb.LGBMClassifier())
-])
-```
-
-**Performance Note**: Row-by-row processing can be slow for large datasets. For 590K transactions:
-- time_window=30 days: ~2-5 min per epoch
-- time_window=7 days: ~1-2 min per epoch
-- Consider using smaller time window or sampling for development
-
----
-
-## Dataset Information
-
-### IEEE Fraud Detection
-- **Samples**: 590,540 transactions
-- **Features**: 394 transaction + 41 identity = 435 total
-- **Target**: `isFraud` (3.5% positive class)
-- **Time Range**: 182 days (TransactionDT in seconds)
-- **Missing Values**: 45% (normal, handled by LightGBM)
-- **Identity Coverage**: 24.4% of transactions
-
-**Key Features:**
-- `TransactionAmt`: Transaction amount in USD
-- `TransactionDT`: Timestamp (seconds from reference)
-- `ProductCD`: Product category (W, C, H, R, S)
-- `card1-6`: Card information
-- `P_emaildomain`, `R_emaildomain`: Email domains
-- `C1-C14`: Count features
-- `D1-D15`: Timedelta features
-- `M1-M9`: Match features (boolean T/F)
-- `V1-V339`: Vesta engineered features
-- `DeviceType`, `DeviceInfo`: Device information
-
-### Bid-Win Prediction (Legacy)
-- **Target**: Binary bid win/loss
-- **Features**: price, flr, sellerClearPrice, dsp, hour, lang, etc.
-- **Maintained for backward compatibility**
-
----
-
-## Testing
-
-### Run Feature Engineering Test
-```bash
-.venv/bin/python3 -c "
-from calibrated_clf.data_loader import load_fraud_data
-from calibrated_clf.model import CalibratedBinaryClassifier
-
-df = load_fraud_data(sample_frac=0.01)
-X = df.drop(columns=['isFraud'])
-X_eng = CalibratedBinaryClassifier.prepare_and_extract_features(X)
-print(f'Original: {X.shape[1]}, Engineered: {X_eng.shape[1]}')
-"
-```
-
-### Run Data Loader Test
-```bash
-.venv/bin/python3 calibrated_clf/data_loader.py
-```
-
----
-
-## Dependencies
-
-**Core:**
-- Python 3.11+
-- LightGBM
-- scikit-learn 1.4.0
-- pandas
-- numpy
-
-**Feature Engineering:**
-- category-encoders
-- feature-engine
-
-**Calibration:**
-- venn-abers (Venn-ABERS conformal prediction)
-
-**Optimization:**
-- optuna
-
-**Interpretation:**
-- shap
-
-**Visualization:**
-- matplotlib
-- seaborn
-
----
-
-## Performance Benchmarks
-
-### Fraud Detection (3.5% fraud rate)
-| Metric | Expected |
-|--------|----------|
-| AUC-ROC | 0.93-0.97 |
-| AUC-PR | 0.55-0.75 |
-| Brier Score | <0.025 |
-| ECE | <0.01 |
-
-**Note**: Calibration is CRITICAL for imbalanced data!
+### TimeWindowedTargetEncoder
+- Prevents both data leakage (only uses past) and concept drift (limits to recent window)
+- Row-by-row processing: ~2-5 min for 590K rows at 30-day window
+- `time_column` must remain in `X` throughout the pipeline
 
 ---
 
 ## Files NOT to Modify
 
-These files work correctly and should not be changed without good reason:
-- `validators.py` - SimpleSplitter already perfect for temporal validation
-- `config.py` - Fixed LightGBM parameters
-- `custom_metrics.py` - AUC-PR implementations
+- `validators.py` — `TemporalGroupSplitter` is correct and optimal
+- `config.py` — fixed LightGBM params + best Optuna hyperparameters
 
----
-
-## Recent Changes
-
-**2026-02-08:**
-- ✅ Implemented Venn-ABERS calibration (`calibrated_clf/calibration.py`)
-- ✅ Added IEEE Fraud Detection data loader (`calibrated_clf/data_loader.py`)
-- ✅ Refactored `BidWinModel` → `CalibratedBinaryClassifier` with backward compatibility
-- ✅ Added comprehensive docstrings (NumPy/Google style)
-- ✅ Added type hints throughout core model
-- ✅ Updated feature engineering for fraud detection (13 new features)
-- ✅ Added calibration comparison to notebook (6 new cells)
-- ✅ Implemented `TimeWindowedTargetEncoder` in `data_transformers.py` for temporal target encoding with sliding window to prevent both data leakage and concept drift
-
----
-
-## Troubleshooting
-
-### LightGBM libomp.dylib Error (macOS)
-```bash
-# Install OpenMP
-brew install libomp
-
-# Or use poetry/uv to reinstall
-uv pip install --force-reinstall lightgbm
-```
-
-### Memory Issues with Large Dataset
-```python
-# Use sampling for development
-df = load_fraud_data(sample_frac=0.1)  # 10% sample
-
-# Or reduce n_bins for time groups
-df['time_group'] = create_time_groups(df, n_bins=20)  # Instead of 50
-```
-
-### Venn-ABERS Import Error
-```bash
-uv pip install venn-abers
-```
+**Key files for active development:**
+- `model.py` — feature engineering, core model
+- `calibration.py` — calibration methods and wrappers
+- `train_model.py` — training pipeline
 
 ---
 
 ## Future Enhancements
 
-**High Priority:**
-- [ ] Add logging throughout the pipeline
-- [ ] Create comprehensive unit tests
-- [ ] Add model monitoring/drift detection
-- [ ] Containerize with Docker
-
-**Medium Priority:**
-- [ ] Add support for multiclass classification
-- [ ] Implement automated feature selection in pipeline
-- [ ] Add model explainability dashboard
-- [ ] Create FastAPI serving endpoint
-
-**Low Priority:**
-- [ ] Support for additional calibration methods (Beta calibration)
-- [ ] Add support for categorical target encoding strategies
-- [ ] Implement automated hyperparameter tuning in production
+- [ ] Unit tests
+- [ ] Logging throughout pipeline
+- [ ] Model monitoring / drift detection
+- [ ] Temporal splits for CVAP (currently stratified k-fold only)
+- [ ] FastAPI serving endpoint
 
 ---
 
-## Contact & Support
-
-**Project Type**: Binary Classification Framework
-**Primary Use Cases**: Fraud Detection, Bid-Win Prediction
-**Calibration**: Isotonic, Venn-ABERS (conformal prediction), Sigmoid
-**Temporal Validation**: SimpleSplitter with time-based splits
-
-**Key Files for Modification:**
-1. `calibrated_clf/model.py` - Core model and feature engineering
-2. `calibrated_clf/data_loader.py` - Data loading and preprocessing
-3. `calibrated_clf/train_model.py` - Training pipeline
-
-**Key Files for Reference Only:**
-1. `calibrated_clf/validators.py` - Temporal validation (already optimal)
-2. `calibrated_clf/config.py` - Fixed parameters (rarely changed)
-3. `FRAUD_DETECTION_MIGRATION_SPEC.md` - Complete migration documentation
-
----
-
-**Last Updated**: 2026-02-08
-**Claude Code Version**: Compatible with Claude Sonnet 4.5+
+**Last Updated**: 2026-03-11 | **Claude**: Sonnet 4.6+

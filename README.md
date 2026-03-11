@@ -11,18 +11,19 @@
 ## 🌟 Key Features
 
 - **Advanced Calibration Methods**
-  - 🎯 **Venn-ABERS**: Conformal prediction with mathematical validity guarantees
+  - 🎯 **Venn-ABERS (IVAP)**: Inductive conformal prediction with mathematical validity guarantees
+  - 🔁 **Venn-ABERS (CVAP)**: Cross conformal — uses 100% of training data for calibration via OOF
   - 📊 Isotonic regression (sklearn standard)
   - 📈 Platt scaling (sigmoid)
-  - 🔍 **Uncertainty quantification** via prediction intervals
+  - 🔍 **Uncertainty quantification** via prediction intervals [p0, p1]
 
 - **Architecture**
-  - ⚡ LightGBM with automated hyperparameter tuning (Optuna)
+  - ⚡ LightGBM with automated hyperparameter tuning (Optuna, temporal CV)
   - 🔧 Stateful feature engineering (no test leakage)
   - 🔬 Recursive Feature Elimination (performance-based, feature-engine)
-  - ⏱️ Temporal validation for time-series data
+  - ⏱️ Temporal validation for time-series data (`TemporalGroupSplitter`)
   - 🕒 **Time-windowed target encoding** (prevents leakage + concept drift)
-  - 📦 Scikit-learn compatible API
+  - 📦 Scikit-learn compatible API with two-stage `fit()` / `calibrate()`
 
 
 ---
@@ -100,19 +101,56 @@ model_isotonic = CalibratedBinaryClassifier(
 )
 probas = model_isotonic.predict_proba(X_test)  # Just probabilities
 
-# Venn-ABERS (prediction intervals)
-model_venn = CalibratedBinaryClassifier(
+# Venn-ABERS IVAP — fast, reserves cal_size fraction for calibration
+model_ivap = CalibratedBinaryClassifier(
     params, calibration_method='venn_abers'
 )
-intervals = model_venn.predict_proba_with_intervals(X_test)
+intervals = model_ivap.predict_proba_with_intervals(X_test)
 # Returns: p_lower, p_upper, p_combined, interval_width
 ```
+
+#### Two-stage API: `fit()` vs `calibrate()`
+
+`MultiCalibrationWrapper` supports two usage patterns:
+
+```python
+from calibrated_clf.calibration import MultiCalibrationWrapper
+
+# fit() — wrapper handles the train/cal split internally
+wrapper = MultiCalibrationWrapper(base_estimator=lgbm, method='venn_abers')
+wrapper.fit(X_train, y_train)
+
+# calibrate() — you supply the pre-split calibration set
+wrapper = MultiCalibrationWrapper(base_estimator=fitted_lgbm, method='venn_abers')
+wrapper.calibrate(X_cal, y_cal)  # base_estimator must already be fitted
+```
+
+#### Cross Venn-ABERS (CVAP)
+
+Uses all training data for calibration via k-fold out-of-fold predictions — no data wasted on a separate calibration split:
+
+```python
+# CVAP: k+1 model fits, 100% of data contributes to calibration scores
+wrapper = MultiCalibrationWrapper(
+    base_estimator=lgbm,
+    method='venn_abers',
+    venn_abers_mode='cross',  # default is 'inductive' (IVAP)
+    cv_folds=5
+)
+wrapper.fit(X_train, y_train)
+```
+
+| Mode | Cal set size | Model fits | Conformal validity |
+|------|-------------|------------|-------------------|
+| IVAP (`inductive`) | `cal_size` × n | 2 | ✅ Yes |
+| CVAP (`cross`) | 100% × n (OOF) | `cv_folds` + 1 | ✅ Yes |
 
 **When to use Venn-ABERS:**
 - 🏥 High-stakes decisions (medical diagnosis, fraud detection, loan approval)
 - 📊 Need uncertainty quantification beyond point estimates
 - ⚖️ Distribution-free guarantees regardless of data characteristics
 - 🚨 Alert systems where wide intervals trigger human review
+- 📉 Small datasets where CVAP avoids wasting data on calibration split
 
 ### 2. Temporal Validation 📅
 
@@ -162,12 +200,12 @@ Calibration method comparison on held-out test set (temporal split, full 590K da
 
 | Method | AUC-PR | Brier Score | Log Loss | ECE |
 |--------|--------|-------------|----------|-----|
-| **Uncalibrated** | **0.5063** | **0.0229** | **0.0946** | **0.0024** |
-| **Isotonic** | 0.4935 | 0.0231 | 0.0955 | 0.0056 |
-| **Venn-ABERS** | 0.4957 | 0.0231 | 0.0950 | 0.0061 |
-| **Sigmoid** | 0.5063 | 0.0239 | 0.1051 | 0.0146 |
+| **Uncalibrated** | **0.5028** | **0.0229** | 0.0956 | **0.0029** |
+| **Isotonic** | 0.4906 | 0.0231 | 0.0978 | 0.0064 |
+| **Venn-ABERS** | 0.4933 | 0.0231 | **0.0955** | 0.0063 |
+| **Sigmoid** | 0.5028 | 0.0239 | 0.1057 | 0.0152 |
 
-> After temporal CV hyperparameter tuning, LightGBM is already well-calibrated (ECE=0.0024). Post-hoc calibration overfits to the calibration split and slightly hurts generalization on the out-of-time test set.
+> After temporal CV hyperparameter tuning, LightGBM is already well-calibrated (ECE=0.003). Post-hoc calibration overfits to the calibration split and slightly hurts generalization on the out-of-time test set.
 
 > Reproduce: run `build_and_evaluate_model.ipynb` on the full IEEE-CIS dataset.
 
@@ -210,8 +248,8 @@ calibrated_clf/
 1. ✅ **Scikit-learn compatible** - Follows sklearn API conventions
 2. ✅ **Fully documented** - NumPy/Google style docstrings everywhere
 3. ✅ **Type-safe** - Complete type hints with type aliases
-4. ✅ **Tested** - 45 unit tests, CI on Python 3.11 and 3.12
-5. ✅ **Robust** - Error handling, validation, logging
+4. ✅ **CI checked** - black formatting enforced on every push
+5. ✅ **Robust** - `check_is_fitted` guards, numerical stability (`np.divide` with `where`)
 
 ---
 
