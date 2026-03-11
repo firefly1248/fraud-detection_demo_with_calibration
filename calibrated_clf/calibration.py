@@ -179,9 +179,7 @@ class MultiCalibrationWrapper(BaseEstimator, ClassifierMixin):
         from sklearn.model_selection import StratifiedKFold
         from sklearn.base import clone
 
-        kf = StratifiedKFold(
-            n_splits=self.cv_folds, shuffle=True, random_state=self.random_state
-        )
+        kf = StratifiedKFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
 
         X_arr = X.values if isinstance(X, pd.DataFrame) else X
         y_arr = y.values if isinstance(y, pd.Series) else y
